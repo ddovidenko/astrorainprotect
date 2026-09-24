@@ -152,20 +152,26 @@ def run_cycle(app: App) -> str:
     dets: list[Detection] = []
     statuses: dict[str, RadarStatus] = {}
     newest: Frame | None = None
-    try:
-        for product in ("reflectivity", "preciprate"):
+    fetch_errors = 0
+    for product in ("reflectivity", "preciprate"):
+        # Per product: one product failing must not discard the other's trigger.
+        try:
             d, status = _detect_product(app, product, now)
-            statuses[product] = status
-            if d is not None:
-                dets.append(d)
-            frames = app.radar.frames(product)
-            if frames and (newest is None or frames[-1].valid_time > newest.valid_time):
-                newest = frames[-1]
+        except MrmsError as exc:
+            fetch_errors += 1
+            statuses[product] = RadarStatus(False, f"fetch failed: {exc}")
+            app.failures["radar"] += 1
+            log.error("ERROR radar %s: %s (consecutive failures: %d)",
+                      product, exc, app.failures["radar"])
+            continue
+        statuses[product] = status
+        if d is not None:
+            dets.append(d)
+        frames = app.radar.frames(product)
+        if frames and (newest is None or frames[-1].valid_time > newest.valid_time):
+            newest = frames[-1]
+    if fetch_errors == 0:
         app.failures["radar"] = 0
-    except MrmsError as exc:
-        app.failures["radar"] += 1
-        log.error("ERROR radar: %s (consecutive failures: %d)", exc, app.failures["radar"])
-        dets, statuses = [], {}
 
     radar_ok = len(statuses) == 2 and all(s.available for s in statuses.values())
     if not radar_ok:

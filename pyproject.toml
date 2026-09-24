@@ -26,6 +26,7 @@ packages = ["astrorainprotect"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not integration'"
 markers = ["integration: needs network access to S3; skipped when offline"]
 
 [tool.ruff]

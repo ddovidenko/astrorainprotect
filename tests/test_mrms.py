@@ -62,6 +62,11 @@ def test_parse_listing_empty():
     assert parse_listing(xml) == []
 
 
+def test_parse_listing_invalid_xml_raises_mrms_error():
+    with pytest.raises(MrmsError):
+        parse_listing("<not xml")
+
+
 def test_key_time():
     k = (
         "CONUS/MergedReflectivityQCComposite_00.50/20260924/"
@@ -73,6 +78,11 @@ def test_key_time():
 def test_key_time_bad():
     with pytest.raises(MrmsError):
         key_time("CONUS/x/whatever.grib2.gz")
+
+
+def test_key_time_invalid_date_raises_mrms_error():
+    with pytest.raises(MrmsError):
+        key_time("CONUS/x/MRMS_x_20261399-000000.grib2.gz")
 
 
 def test_newest_key_by_timestamp_not_order():

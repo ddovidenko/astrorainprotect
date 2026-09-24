@@ -118,13 +118,15 @@ def test_repeat(tmp_path):
     assert [t for t, _ in app.notifier.sent] == ["Rain incoming", "Rain incoming (still)"]
 
 
-def test_send_failure_does_not_latch(tmp_path):
+def test_send_failure_does_not_latch(tmp_path, caplog):
+    caplog.set_level(logging.ERROR)
     app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)),
                 notifier=FakeNotifier(ok=False))
     run_cycle(app)
     assert not app.state.latched()
     run_cycle(app)
     assert len(app.notifier.sent) == 2                # retried next poll
+    assert any("consecutive failures: 2" in r.getMessage() for r in caplog.records)
 
 
 def test_raining_now_rearms(tmp_path):
@@ -148,6 +150,16 @@ def test_radar_unavailable_leaves_latch(tmp_path, caplog):
     assert any("radar unavailable" in r.getMessage() for r in caplog.records)
 
 
+def test_radar_partial_outage_leaves_latch(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert app.state.latched()
+    app.radar = FakeRadar(empty("preciprate"), None)
+    run_cycle(app)
+    assert app.state.latched()
+    assert len(app.notifier.sent) == 1                # nothing new was sent
+
+
 def test_radar_error_is_logged_and_loop_continues(tmp_path, caplog):
     from astrorainprotect.mrms import MrmsError
     caplog.set_level(logging.ERROR)
@@ -167,6 +179,7 @@ def test_scope_offline_skips_and_clears_latch(tmp_path, caplog):
     assert not app.state.latched()
     assert "no scope online" in line
     assert app.notifier.sent == []
+    assert app.state.heartbeat_age_sec(NOW.timestamp()) == 0.0
 
 
 def test_scope_online_runs_checks(tmp_path):

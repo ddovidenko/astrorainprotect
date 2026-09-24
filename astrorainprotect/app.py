@@ -100,13 +100,15 @@ def _maybe_send_test(app: App) -> None:
             app.state.mark_test_sent()
             log.info("TEST notification sent")
         else:
-            log.error("TEST notification failed")
+            app.failures["ntfy"] += 1
+            log.error(
+                "ERROR ntfy: test send failed (consecutive failures: %d)", app.failures["ntfy"]
+            )
 
 
 def run_cycle(app: App) -> str:
     cfg, now = app.cfg, app.clock()
     ts = now.timestamp()
-    app.state.heartbeat(ts)
 
     if cfg.scope_hosts:
         online = app.scope_check()
@@ -114,6 +116,7 @@ def run_cycle(app: App) -> str:
             app.state.clear_latch()
             line = f"no scope online ({cfg.scope_hosts}), not checking"
             log.info(line)
+            app.state.heartbeat(ts)
             return line
         if cfg.debug >= 1:
             log.info("DEBUG scope(s) online: %s", " ".join(online))
@@ -138,9 +141,10 @@ def run_cycle(app: App) -> str:
         log.error("ERROR radar: %s (consecutive failures: %d)", exc, app.failures["radar"])
         dets, statuses = [], {}
 
-    radar_ok = bool(statuses) and any(s.available for s in statuses.values())
+    radar_ok = len(statuses) == 2 and all(s.available for s in statuses.values())
     if not radar_ok:
-        reasons = "; ".join(f"{p}: {s.reason}" for p, s in statuses.items()) or "fetch failed"
+        unavailable = [f"{p}: {s.reason}" for p, s in statuses.items() if not s.available]
+        reasons = "; ".join(unavailable) or "fetch failed"
         log.warning("radar unavailable (%s); latch untouched", reasons)
 
     triggers: list[Trigger] = []
@@ -184,6 +188,9 @@ def run_cycle(app: App) -> str:
             )
         else:
             app.failures["ntfy"] += 1
+            log.error(
+                "ERROR ntfy: send failed (consecutive failures: %d)", app.failures["ntfy"]
+            )
             outcome = "send-failed"
     elif decision.action is Action.REARM:
         app.state.clear_latch()
@@ -204,6 +211,7 @@ def run_cycle(app: App) -> str:
             f"sources={','.join(t.source for t in triggers) or 'none'} "
             f"latched={int(app.state.latched())} outcome={outcome}")
     log.info(line)
+    app.state.heartbeat(ts)
     return line
 
 

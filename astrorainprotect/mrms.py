@@ -41,7 +41,10 @@ def day_prefixes(product: str, now: datetime) -> list[str]:
 
 
 def parse_listing(xml_text: str) -> list[str]:
-    root = ET.fromstring(xml_text)
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as exc:
+        raise MrmsError(f"S3 listing returned unparseable XML: {exc}") from exc
     return [el.text for el in root.iter(f"{_S3_NS}Key") if el.text]
 
 
@@ -49,7 +52,10 @@ def key_time(key: str) -> datetime:
     m = _KEY_TIME.search(key)
     if not m:
         raise MrmsError(f"cannot parse timestamp from key {key!r}")
-    return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S").replace(tzinfo=UTC)
+    try:
+        return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S").replace(tzinfo=UTC)
+    except ValueError as exc:
+        raise MrmsError(f"cannot parse timestamp from key {key!r}") from exc
 
 
 def newest_key(keys: Iterable[str]) -> str | None:

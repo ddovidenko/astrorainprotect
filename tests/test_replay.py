@@ -43,7 +43,8 @@ def test_replay_source_time_travel(tmp_path):
 def test_run_replay_reports_would_send(tmp_path, caplog):
     caplog.set_level(logging.INFO)
     save_sequence(tmp_path)
-    cfg = load_config({**BASE, "REPLAY_DIR": str(tmp_path), "STATE_DIR": str(tmp_path / "unused")})
+    cfg = load_config({**BASE, "REPLAY_DIR": str(tmp_path), "STATE_DIR": str(tmp_path / "unused"),
+                       "SCOPE_HOSTS": "10.0.0.5"})     # replay ignores the scope gate
     n = run_replay(cfg, tmp_path)
     assert n == 4
     would = [r.getMessage() for r in caplog.records if r.getMessage().startswith("WOULD SEND")]

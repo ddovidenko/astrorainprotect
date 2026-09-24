@@ -55,7 +55,8 @@ def run_replay(cfg: Config, replay_dir: Path | str) -> int:
     clock = {"t": times[0] if times else None}
     with tempfile.TemporaryDirectory() as tmp:
         app = App(cfg=cfg, radar=ReplaySource(frames), notifier=DryRunNotifier(),
-                  state=State(Path(tmp) / "state", Path(tmp) / "tmp"), scope_check=lambda: [],
+                  state=State(Path(tmp) / "state", Path(tmp) / "tmp"),
+                  scope_check=lambda: ["replay"],   # SCOPE_HOSTS must not gate a replay
                   pirate=None, clock=lambda: clock["t"])
         for t in times:
             clock["t"] = t

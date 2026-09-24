@@ -98,7 +98,8 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
     eta: float | None = None
     if cfg.direction_filter:
         refl = next((d for d in hits if d.product == "reflectivity"), None)
-        m = estimate(app.radar.frames("reflectivity")) if refl is not None else None
+        refl_frames = app.radar.frames("reflectivity") if refl is not None else []
+        m = estimate(refl_frames) if refl is not None else None
         if refl is not None and m is not None:
             nearest_hit = min(hits, key=lambda d: d.nearest_km)
             a = project(nearest_hit, m,
@@ -112,8 +113,11 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
                 )
                 app.last_note = "moving away"
                 return None
-            eta = a.eta_min
-            detail += f", eta {a.eta_min:.0f} min"
+            # The projection runs from the frame's valid time; count down the frame's age so
+            # the message says how long from now. will_hit above stays on the raw projection.
+            age_min = (now - refl_frames[-1].valid_time).total_seconds() / 60
+            eta = max(0.0, (a.eta_min or 0.0) - age_min)
+            detail += f", eta {eta:.0f} min"
         elif cfg.debug >= 1:
             log.info("DEBUG direction filter: motion unknown, plain radius alerting")
     return Trigger(source="radar", eta_min=eta, detail=detail)

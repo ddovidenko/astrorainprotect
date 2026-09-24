@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -308,12 +309,16 @@ def test_build_app_creates_pirate_only_with_key(tmp_path):
     assert isinstance(build_app(cfg).pirate, PirateSource)
 
 
-def moving_storm(k, toward=True):
-    """Reflectivity blob ~11 km SW that steps 3 cells per frame toward (or away from) the house."""
+def moving_storm(k, toward=True, age_min=0.0):
+    """Reflectivity blob ~11 km SW that steps 3 cells per frame toward (or away from) the house.
+
+    age_min shifts every frame back in time so the newest (k=2) is that many minutes old.
+    """
     g = np.zeros((101, 101), dtype=np.float32)
     off = -k if toward else k                      # one cell per 2-minute frame
     g[62 + off:66 + off, 38 - off:42 - off] = 40.0  # starts ~14 km SW; stays inside 20 km
-    return make_frame(g, product="reflectivity", valid_time=NOW - timedelta(minutes=2 * (2 - k)))
+    return make_frame(g, product="reflectivity",
+                      valid_time=NOW - timedelta(minutes=2 * (2 - k) + age_min))
 
 
 class HistoryRadar(FakeRadar):
@@ -339,6 +344,25 @@ def test_direction_filter_alerts_with_eta_for_approaching_storm(tmp_path):
     run_cycle(app)
     assert len(app.notifier.sent) == 1
     assert app.notifier.sent[0][1].startswith("Rain expected in about")
+
+
+def _eta_in_message(tmp_path, age_min):
+    radar = HistoryRadar([moving_storm(k, toward=True, age_min=age_min) for k in range(3)])
+    app = build(tmp_path / f"age{age_min}", env={"DIRECTION_FILTER": "1"}, radar=radar)
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    msg = app.notifier.sent[0][1]
+    m = re.match(r"Rain expected in about (\d+) min", msg)
+    assert m, msg
+    assert f"eta {m.group(1)} min" in msg          # detail carries the same adjusted ETA
+    return int(m.group(1))
+
+
+def test_eta_is_adjusted_for_frame_age(tmp_path):
+    fresh = _eta_in_message(tmp_path, 0.0)
+    aged = _eta_in_message(tmp_path, 4.0)
+    assert aged < fresh
+    assert abs((fresh - aged) - 4) <= 1               # rounding of both ETAs
 
 
 def test_direction_filter_falls_back_without_history(tmp_path):

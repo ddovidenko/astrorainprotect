@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import gzip
 import re
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import eccodes
 import httpx
+import numpy as np
+
+from astrorainprotect.frame import Frame
 
 BUCKET_URL = "https://noaa-mrms-pds.s3.amazonaws.com"
 PRODUCTS = {
@@ -59,3 +65,81 @@ def list_keys(client: httpx.Client, prefix: str) -> list[str]:
     if r.status_code != 200:
         raise MrmsError(f"S3 listing returned HTTP {r.status_code} for {prefix}")
     return parse_listing(r.text)
+
+
+MISSING_BELOW = {"preciprate": 0.0, "reflectivity": -990.0}
+
+
+@dataclass(frozen=True)
+class GridMeta:
+    lat0: float   # latitude of row 0 (north edge)
+    lon0: float   # longitude of column 0, 0-360 convention
+    dlat: float
+    dlon: float
+    ni: int       # columns
+    nj: int       # rows
+
+
+def fetch_grib(client: httpx.Client, key: str) -> bytes:
+    try:
+        r = client.get(f"{BUCKET_URL}/{key}", timeout=60.0)
+    except httpx.HTTPError as exc:
+        raise MrmsError(f"S3 download failed for {key}: {exc}") from exc
+    if r.status_code != 200:
+        raise MrmsError(f"S3 download returned HTTP {r.status_code} for {key}")
+    try:
+        return gzip.decompress(r.content)
+    except (OSError, EOFError) as exc:
+        raise MrmsError(f"gunzip failed for {key}: {exc}") from exc
+
+
+def decode_grib(data: bytes) -> tuple[GridMeta, np.ndarray]:
+    try:
+        gid = eccodes.codes_new_from_message(data)
+    except Exception as exc:  # eccodes raises several types
+        raise MrmsError(f"GRIB decode failed: {exc}") from exc
+    try:
+        meta = GridMeta(
+            lat0=float(eccodes.codes_get(gid, "latitudeOfFirstGridPointInDegrees")),
+            lon0=float(eccodes.codes_get(gid, "longitudeOfFirstGridPointInDegrees")),
+            dlat=float(eccodes.codes_get(gid, "jDirectionIncrementInDegrees")),
+            dlon=float(eccodes.codes_get(gid, "iDirectionIncrementInDegrees")),
+            ni=int(eccodes.codes_get(gid, "Ni")),
+            nj=int(eccodes.codes_get(gid, "Nj")),
+        )
+        if int(eccodes.codes_get(gid, "scanningMode")) != 0:
+            raise MrmsError("GRIB decode failed: unexpected scanningMode")
+        values = eccodes.codes_get_values(gid).reshape(meta.nj, meta.ni)
+    except MrmsError:
+        raise
+    except Exception as exc:
+        raise MrmsError(f"GRIB decode failed: {exc}") from exc
+    finally:
+        eccodes.codes_release(gid)
+    return meta, values
+
+
+def subset(values: np.ndarray, meta: GridMeta, lat: float, lon: float, half_deg: float):
+    """Cut a (2*half_deg) box around lat/lon. Returns (lats, lons, sub) with lons in -180..180."""
+    lon360 = lon % 360.0
+    jc = int(round((meta.lat0 - lat) / meta.dlat))
+    ic = int(round((lon360 - meta.lon0) / meta.dlon))
+    h = int(round(half_deg / meta.dlat))
+    j0, j1 = max(jc - h, 0), min(jc + h + 1, meta.nj)
+    i0, i1 = max(ic - h, 0), min(ic + h + 1, meta.ni)
+    lats = meta.lat0 - meta.dlat * np.arange(j0, j1)
+    lons = ((meta.lon0 + meta.dlon * np.arange(i0, i1)) + 180.0) % 360.0 - 180.0
+    return lats, lons, np.array(values[j0:j1, i0:i1], dtype=np.float32)
+
+
+def to_frame(product: str, valid_time: datetime, lats: np.ndarray, lons: np.ndarray,
+             sub: np.ndarray) -> Frame:
+    missing = sub < MISSING_BELOW[product]
+    return Frame(
+        product=product,
+        valid_time=valid_time,
+        lats=lats,
+        lons=lons,
+        values=np.maximum(sub, 0.0).astype(np.float32),
+        missing_fraction=float(missing.mean()) if sub.size else 1.0,
+    )

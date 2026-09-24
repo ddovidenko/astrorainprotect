@@ -1,18 +1,26 @@
+import gzip
 from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
+import numpy as np
 import pytest
 
 from astrorainprotect.mrms import (
     BUCKET_URL,
+    MISSING_BELOW,
     PRODUCTS,
+    GridMeta,
     MrmsError,
     day_prefixes,
+    decode_grib,
+    fetch_grib,
     key_time,
     list_keys,
     newest_key,
     parse_listing,
+    subset,
+    to_frame,
 )
 
 FIX = Path(__file__).parent / "fixtures"
@@ -104,3 +112,107 @@ def test_list_keys_network_error():
     client = httpx.Client(transport=httpx.MockTransport(boom))
     with pytest.raises(MrmsError, match="no route"):
         list_keys(client, "CONUS/PrecipRate_00.00/20260924/")
+
+
+CONUS = GridMeta(lat0=54.995, lon0=230.005, dlat=0.01, dlon=0.01, ni=7000, nj=3500)
+
+
+def test_subset_negative_longitude():
+    values = np.zeros((CONUS.nj, CONUS.ni), dtype=np.float32)
+    # mark the cell nearest the house
+    j = round((54.995 - 29.97) / 0.01)
+    i = round(((-95.67 % 360) - 230.005) / 0.01)
+    values[j, i] = 7.0
+    lats, lons, sub = subset(values, CONUS, 29.97, -95.67, 0.5)
+    assert sub.shape == (101, 101)
+    assert sub[50, 50] == 7.0
+    # nearest grid row/col, half a cell off at most
+    assert lats[50] == pytest.approx(29.97, abs=0.011)
+    assert lons[50] == pytest.approx(-95.67, abs=0.011)
+    assert lats[0] > lats[-1]
+    assert lons[0] < lons[-1]
+    assert -180 <= lons.min() and lons.max() <= 180
+
+
+def test_subset_clipped_at_grid_edge():
+    values = np.zeros((CONUS.nj, CONUS.ni), dtype=np.float32)
+    lats, lons, sub = subset(values, CONUS, 54.9, -129.9, 0.5)
+    assert sub.shape[0] < 101 and sub.shape[1] < 101
+    assert sub.shape == (len(lats), len(lons))
+
+
+def test_to_frame_preciprate_missing():
+    sub = np.array([[-3.0, -1.0], [0.5, 2.0]], dtype=np.float32)
+    f = to_frame(
+        "preciprate", datetime(2026, 9, 24, tzinfo=UTC),
+        np.array([1.0, 0.0]), np.array([0.0, 1.0]), sub,
+    )
+    assert f.missing_fraction == pytest.approx(0.5)
+    assert f.values.min() >= 0
+    assert f.values[1, 1] == 2.0
+    assert f.values.dtype == np.float32
+
+
+def test_to_frame_reflectivity_missing():
+    sub = np.array([[-999.0, -99.0], [-5.0, 42.0]], dtype=np.float32)
+    f = to_frame(
+        "reflectivity", datetime(2026, 9, 24, tzinfo=UTC),
+        np.array([1.0, 0.0]), np.array([0.0, 1.0]), sub,
+    )
+    assert f.missing_fraction == pytest.approx(0.25)     # only -999 is missing
+    assert f.values.min() >= 0                            # -99 and -5 clamp to 0
+    assert f.values[1, 1] == 42.0
+
+
+def test_missing_below_table():
+    assert MISSING_BELOW == {"preciprate": 0.0, "reflectivity": -990.0}
+
+
+def test_fetch_grib_gunzips():
+    payload = gzip.compress(b"GRIB-bytes")
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, content=payload))
+    )
+    assert fetch_grib(client, "CONUS/x/y.grib2.gz") == b"GRIB-bytes"
+
+
+def test_fetch_grib_404():
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
+    with pytest.raises(MrmsError, match="404"):
+        fetch_grib(client, "CONUS/x/y.grib2.gz")
+
+
+def test_fetch_grib_bad_gzip():
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, content=b"nope"))
+    )
+    with pytest.raises(MrmsError, match="gunzip"):
+        fetch_grib(client, "CONUS/x/y.grib2.gz")
+
+
+def test_decode_garbage():
+    with pytest.raises(MrmsError, match="decode"):
+        decode_grib(b"not a grib")
+
+
+@pytest.mark.integration
+def test_decode_real_file():
+    """Downloads the newest PrecipRate file. Skipped when S3 is unreachable."""
+    client = httpx.Client()
+    try:
+        keys = []
+        for p in day_prefixes("preciprate", datetime.now(UTC)):
+            keys += list_keys(client, p)
+    except MrmsError as exc:
+        pytest.skip(f"offline: {exc}")
+    key = newest_key(keys)
+    assert key
+    meta, values = decode_grib(fetch_grib(client, key))
+    assert (meta.ni, meta.nj) == (7000, 3500)
+    assert meta.lat0 == pytest.approx(54.995)
+    assert meta.lon0 == pytest.approx(230.005)
+    assert values.shape == (3500, 7000)
+    lats, lons, sub = subset(values, meta, 29.97, -95.67, 0.5)
+    f = to_frame("preciprate", key_time(key), lats, lons, sub)
+    assert f.values.shape == (101, 101)
+    assert 0 <= f.values.max() < 500

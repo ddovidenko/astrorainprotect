@@ -273,6 +273,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     _setup_logging(cfg.debug)
     log.info("astrorainprotect starting\n%s", describe(cfg))
+    if cfg.replay_dir:
+        from astrorainprotect.replay import run_replay
+        run_replay(cfg, cfg.replay_dir)
+        return 0
     app = build_app(cfg)
     app.state.clear_test_marker()
 

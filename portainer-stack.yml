@@ -1,6 +1,7 @@
 # Portainer: Stacks > Add stack > Repository, pointing at this repo, compose path portainer-stack.yml.
 # Set the variables in the stack's Environment variables section. Only LAT, LON, NTFY_URL are required.
 # The host directory /opt/astrorainprotect/state must be writable by uid 1000.
+# Not exposed on purpose: STATE_DIR is fixed to /state by the image and the volume below; REPLAY_DIR is a local tuning mode that exits after one pass and does not belong in a production stack.
 services:
   astrorainprotect:
     image: ghcr.io/ddovidenko/astrorainprotect:latest

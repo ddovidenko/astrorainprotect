@@ -99,7 +99,7 @@ script):
 Each poll cycle ends with one summary line, for example:
 
 ```
-2026-09-23 14:32:07 INFO frame=19:31:00Z age=1.1min reflectivity=max:38.4,cells:5,nearest:12.3km@NW preciprate=max:1.8,cells:4,nearest:11.9km@NW raining_now=0 eta=18min sources=radar latched=1 outcome=send
+2026-09-23 14:32:07 INFO frame=19:31:00Z age=1.1min reflectivity=max:38.4,cells:5,nearest:12.3 km to the NW preciprate=max:0.0,cells:0,nearest:no echo in range raining_now=0 eta=none sources=radar latched=1 outcome=send
 ```
 
 - `frame` — UTC valid time of the newest radar frame used this cycle (`none` if
@@ -107,12 +107,15 @@ Each poll cycle ends with one summary line, for example:
 - `age` — how old that frame was when the cycle ran.
 - per-product fields (`reflectivity=...`, `preciprate=...`) — for each radar
   product, `max` (highest value in the alert radius), `cells` (qualifying cell
-  count), and `nearest` (distance and compass bearing to the nearest qualifying
-  cell). Shown as `radar=unavailable` when neither product could be fetched.
+  count), and `nearest` (distance and compass direction to the nearest
+  qualifying cell, e.g. `12.3 km to the NW`, or `no echo in range` when no
+  cell in the alert radius met that product's threshold). Shown as
+  `radar=unavailable` when neither product could be fetched.
 - `raining_now` — 1 if a PrecipRate cell within `NOW_RADIUS_KM` exceeds
   `RAINING_NOW`, else 0.
 - `eta` — minutes until rain from the fastest-arriving trigger, or `none` if no
-  trigger carries an ETA.
+  trigger carries an ETA (radar triggers never carry one; only Pirate Weather
+  triggers do).
 - `sources` — which trigger(s) fired this cycle (`radar`, `pirate weather`, both,
   or `none`).
 - `latched` — 1 if the alarm is currently latched (an alert is active), else 0.

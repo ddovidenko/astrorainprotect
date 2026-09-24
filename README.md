@@ -1,4 +1,142 @@
 # astrorainprotect
 
-Radar-based rain alarm that pushes to ntfy. Setup and tuning guide coming with the
-container release; see `CLAUDE.md` for the brief and `docs/superpowers/` for the design.
+## What it does
+
+astrorainprotect is a self-hosted rain alarm for a house in Cypress (NW Houston),
+Texas. It watches NOAA MRMS radar (reflectivity and PrecipRate) near a fixed
+`LAT,LON`, keeps Pirate Weather as a secondary trigger for organized systems, and
+pushes a notification to an iPhone via ntfy when rain is heading for the house —
+early enough to bring in ZWO Seestar telescopes left outside overnight.
+
+## Quick start (Portainer)
+
+1. On the Docker host, create the state directory and hand it to the container's
+   user: `mkdir -p /opt/astrorainprotect/state && chown 1000:1000
+   /opt/astrorainprotect/state`.
+2. In Portainer, add a Git-repository stack pointing at this repo with compose
+   path `portainer-stack.yml`.
+3. In the stack's Environment variables section, set `LAT`, `LON`, `NTFY_URL`,
+   and optionally `NTFY_TOKEN` (the rest have working defaults — see
+   Configuration below).
+4. Deploy the stack.
+
+The GHCR package (`ghcr.io/ddovidenko/astrorainprotect`) must be set to public
+in GitHub package settings, or Portainer needs registry credentials configured
+for `ghcr.io`, before it can pull the image.
+
+## Local development
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
+.venv/bin/pytest                       # unit tests, no network
+.venv/bin/pytest -m integration        # also hits the live MRMS S3 bucket
+cp .env.example .env && docker compose up --build
+```
+
+## Configuration
+
+Legacy names preserved; new vars marked.
+
+| Var | Default | Meaning |
+|---|---|---|
+| `LAT`, `LON` | required | house coordinates |
+| `NTFY_URL` | required | server + topic |
+| `NTFY_TOKEN` | empty | bearer token for protected topics |
+| `NTFY_PRIORITY` (new) | `high` | ntfy priority header |
+| `DEBUG` | 0 | 0/1/2 |
+| `POLL_SEC` | 180 | radar poll interval |
+| `ALERT_RADIUS_KM` | 20 | radius for "nearby" |
+| `NOW_RADIUS_KM` | 1 | radius for "raining now" |
+| `MIN_INTENSITY` | 0.2 | mm/h for a PrecipRate cell to count |
+| `MIN_DBZ` (new) | 30 | dBZ for a reflectivity cell to count |
+| `MIN_CELLS` | 3 | qualifying cells needed |
+| `RAINING_NOW` | 0.05 | mm/h at the house = already raining |
+| `DIRECTION_FILTER` | 0 | 1 = ignore echoes moving away |
+| `LOOKAHEAD_MIN` | 60 | projection horizon, also Pirate Weather window |
+| `REPEAT_MIN` | 0 | repeat interval while active |
+| `SCOPE_HOSTS` | empty | scope-online gate |
+| `PW_KEY` | empty | enables Pirate Weather trigger |
+| `MIN_PROB` | 0.3 | Pirate Weather probability threshold |
+| `REPLAY_DIR` (new) | empty | run detector over saved frames and exit |
+| `STATE_DIR` (new) | `/state` | latch/heartbeat directory; tests and local runs override it |
+| `TZ` | America/Chicago | log timestamps |
+
+Startup validates required vars and numeric ranges, prints the effective config
+with `NTFY_TOKEN` and `PW_KEY` masked, and exits non-zero on error.
+
+## How alerts behave
+
+Each poll cycle checks radar and, if configured, Pirate Weather, and feeds the
+result into a small latch-based state machine (ported from the legacy shell
+script):
+
+- **First trigger**: if rain qualifies nearby and the alarm isn't already
+  latched, it sends an alert and latches.
+- **Latch**: while latched, further qualifying cycles are skipped — no repeat
+  notifications — unless `REPEAT_MIN` is set.
+- **Repeat**: with `REPEAT_MIN > 0`, a "still raining" repeat alert is sent once
+  the latch has been active for at least that many minutes; with the default
+  `REPEAT_MIN=0`, there is no repeat, ever.
+- **Rearm**: once rain is no longer triggering (and it isn't already raining at
+  the house) the latch clears, so the next qualifying cell can alert again. If
+  it's already raining at the house (`raining_now`), no new alert fires even
+  without a latch — there's nothing left to warn about — and the latch clears
+  so the next event can trigger cleanly.
+- **Scope gate**: if `SCOPE_HOSTS` is set, the cycle first checks whether any of
+  those hosts are online (e.g. the Seestar's Wi-Fi). If none are, the latch is
+  cleared and the cycle skips radar/Pirate Weather checks entirely for that
+  poll — nothing outside is at risk to protect.
+- **DEBUG levels**: `DEBUG=0` is silent apart from normal INFO logging.
+  `DEBUG=1` adds extra detail lines (which scope hosts are online, the Pirate
+  Weather summary). `DEBUG=2` additionally sends a one-time test notification
+  on startup, so you can confirm the ntfy path works without waiting for rain.
+- **Direction filter**: `DIRECTION_FILTER` is parsed and validated today but not
+  yet wired into the alarm decision — it will start suppressing away-moving
+  echoes once motion estimation lands.
+
+## Reading the logs
+
+Each poll cycle ends with one summary line, for example:
+
+```
+2026-09-23 14:32:07 INFO frame=19:31:00Z age=1.1min reflectivity=max:38.4,cells:5,nearest:12.3km@NW preciprate=max:1.8,cells:4,nearest:11.9km@NW raining_now=0 eta=18min sources=radar latched=1 outcome=send
+```
+
+- `frame` — UTC valid time of the newest radar frame used this cycle (`none` if
+  none was available).
+- `age` — how old that frame was when the cycle ran.
+- per-product fields (`reflectivity=...`, `preciprate=...`) — for each radar
+  product, `max` (highest value in the alert radius), `cells` (qualifying cell
+  count), and `nearest` (distance and compass bearing to the nearest qualifying
+  cell). Shown as `radar=unavailable` when neither product could be fetched.
+- `raining_now` — 1 if a PrecipRate cell within `NOW_RADIUS_KM` exceeds
+  `RAINING_NOW`, else 0.
+- `eta` — minutes until rain from the fastest-arriving trigger, or `none` if no
+  trigger carries an ETA.
+- `sources` — which trigger(s) fired this cycle (`radar`, `pirate weather`, both,
+  or `none`).
+- `latched` — 1 if the alarm is currently latched (an alert is active), else 0.
+- `outcome` — what the cycle actually did: `send`, `repeat`, `skip`, `re-armed`,
+  `none`, or `send-failed`.
+
+## Tuning
+
+Start with the defaults. If alerts feel late, lower `MIN_DBZ` to `25` for
+earlier — but noisier — alerts. If single-pixel radar noise is triggering false
+alarms, raise `MIN_CELLS`. During an imaging session where you want a reminder
+that rain is still active, set `REPEAT_MIN=10`. Once phase 6 (motion
+estimation) lands, set `DIRECTION_FILTER=1` to stop alerting on echoes that are
+moving away from the house.
+
+## Gotchas
+
+- ntfy: the topic is the last path segment of `NTFY_URL`; the token is a
+  separate `tk_...` credential. Do not conflate them.
+- ntfy iOS app has had a bug where notifications arrive silent; not something
+  this project can fix. `Priority` and emoji tags do not control sound.
+- Portainer's web-editor stacks cannot `build:`; hence the GHCR image.
+- Docker creates a *directory* if a bind-mounted file path is missing on the
+  host; avoid host-file mounts entirely in the new version.
+- Pirate Weather free tier has a monthly call cap; polling every 5 minutes fits.
+  Do not poll it faster.
+- MRMS timestamps are UTC; log in local time but keep the frame timestamp UTC.

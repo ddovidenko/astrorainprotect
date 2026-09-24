@@ -259,3 +259,51 @@ def test_build_app_creates_pirate_only_with_key(tmp_path):
     assert build_app(cfg).pirate is None
     cfg = load_config({**BASE, "STATE_DIR": str(tmp_path), "PW_KEY": "k"})
     assert isinstance(build_app(cfg).pirate, PirateSource)
+
+
+def moving_storm(k, toward=True):
+    """Reflectivity blob ~11 km SW that steps 3 cells per frame toward (or away from) the house."""
+    g = np.zeros((101, 101), dtype=np.float32)
+    off = -k if toward else k                      # one cell per 2-minute frame
+    g[62 + off:66 + off, 38 - off:42 - off] = 40.0  # starts ~14 km SW; stays inside 20 km
+    return make_frame(g, product="reflectivity", valid_time=NOW - timedelta(minutes=2 * (2 - k)))
+
+
+class HistoryRadar(FakeRadar):
+    def __init__(self, frames):
+        super().__init__(empty("preciprate"), frames[-1])
+        self._hist = frames
+
+    def frames(self, product):
+        return self._hist if product == "reflectivity" else [self.by_product["preciprate"]]
+
+
+def test_direction_filter_suppresses_receding_storm(tmp_path):
+    radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)])
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    line = run_cycle(app)
+    assert app.notifier.sent == []
+    assert "moving away" in line
+
+
+def test_direction_filter_alerts_with_eta_for_approaching_storm(tmp_path):
+    radar = HistoryRadar([moving_storm(k, toward=True) for k in range(3)])
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    assert app.notifier.sent[0][1].startswith("Rain expected in about")
+
+
+def test_direction_filter_falls_back_without_history(tmp_path):
+    # one frame only
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"},
+                radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1                 # never suppress without motion data
+
+
+def test_direction_filter_off_ignores_motion(tmp_path):
+    radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)])
+    app = build(tmp_path, radar=radar)
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1

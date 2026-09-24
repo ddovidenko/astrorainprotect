@@ -12,6 +12,7 @@ from astrorainprotect.mrms import (
     PRODUCTS,
     GridMeta,
     MrmsError,
+    RadarSource,
     day_prefixes,
     decode_grib,
     fetch_grib,
@@ -216,3 +217,86 @@ def test_decode_real_file():
     f = to_frame("preciprate", key_time(key), lats, lons, sub)
     assert f.values.shape == (101, 101)
     assert 0 <= f.values.max() < 500
+
+
+def _listing(keys):
+    items = "".join(f"<Contents><Key>{k}</Key></Contents>" for k in keys)
+    return (f'<?xml version="1.0"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+            f"{items}</ListBucketResult>")
+
+
+class FakeBucket:
+    """Serves listings and one canned gzipped payload; decode is monkeypatched."""
+
+    def __init__(self, keys):
+        self.keys = keys
+        self.downloads = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/":
+            return httpx.Response(200, text=_listing(self.keys))
+        self.downloads.append(request.url.path.lstrip("/"))
+        return httpx.Response(200, content=gzip.compress(b"fake"))
+
+
+def _fake_decode(data):
+    assert data == b"fake"
+    values = np.zeros((CONUS.nj, CONUS.ni), dtype=np.float32)
+    return CONUS, values
+
+
+@pytest.fixture
+def fake_decode(monkeypatch):
+    monkeypatch.setattr("astrorainprotect.mrms.decode_grib", _fake_decode)
+
+
+K1 = "CONUS/PrecipRate_00.00/20260924/MRMS_PrecipRate_00.00_20260924-120000.grib2.gz"
+K2 = "CONUS/PrecipRate_00.00/20260924/MRMS_PrecipRate_00.00_20260924-120200.grib2.gz"
+NOW = datetime(2026, 9, 24, 12, 3, tzinfo=UTC)
+
+
+def test_radar_source_downloads_newest_once(fake_decode):
+    bucket = FakeBucket([K1])
+    src = RadarSource(httpx.Client(transport=httpx.MockTransport(bucket)), 29.97, -95.67)
+    f1 = src.fetch_latest("preciprate", NOW)
+    f2 = src.fetch_latest("preciprate", NOW)
+    assert f1 is f2
+    assert bucket.downloads == [K1]
+    assert f1.valid_time == datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
+    assert f1.values.shape == (101, 101)
+    assert src.frames("preciprate") == [f1]
+
+
+def test_radar_source_cache_order_and_limit(fake_decode):
+    bucket = FakeBucket([K1])
+    src = RadarSource(httpx.Client(transport=httpx.MockTransport(bucket)), 29.97, -95.67, cache=2)
+    a = src.fetch_latest("preciprate", NOW)
+    bucket.keys = [K1, K2]
+    b = src.fetch_latest("preciprate", NOW)
+    assert src.frames("preciprate") == [a, b]
+    bucket.keys = [K1, K2, K2.replace("120200", "120400")]
+    c = src.fetch_latest("preciprate", NOW)
+    assert src.frames("preciprate") == [b, c]
+
+
+def test_radar_source_empty_listing(fake_decode):
+    src = RadarSource(httpx.Client(transport=httpx.MockTransport(FakeBucket([]))), 29.97, -95.67)
+    assert src.fetch_latest("preciprate", NOW) is None
+    assert src.frames("preciprate") == []
+
+
+def test_radar_source_products_are_independent(fake_decode):
+    kr = "CONUS/MergedReflectivityQCComposite_00.50/20260924/MRMS_MergedReflectivityQCComposite_00.50_20260924-120040.grib2.gz"  # noqa: E501
+    bucket = FakeBucket([K1, kr])
+    src = RadarSource(httpx.Client(transport=httpx.MockTransport(bucket)), 29.97, -95.67)
+    p = src.fetch_latest("preciprate", NOW)
+    r = src.fetch_latest("reflectivity", NOW)
+    assert p.product == "preciprate" and r.product == "reflectivity"
+    assert src.frames("reflectivity") == [r]
+
+
+def test_radar_source_propagates_errors(fake_decode):
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    src = RadarSource(client, 29.97, -95.67)
+    with pytest.raises(MrmsError):
+        src.fetch_latest("preciprate", NOW)

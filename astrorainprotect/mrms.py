@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import re
 import xml.etree.ElementTree as ET
+from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -143,3 +144,35 @@ def to_frame(product: str, valid_time: datetime, lats: np.ndarray, lons: np.ndar
         values=np.maximum(sub, 0.0).astype(np.float32),
         missing_fraction=float(missing.mean()) if sub.size else 1.0,
     )
+
+
+class RadarSource:
+    """Fetches the newest frame per product and keeps a short history for motion estimation."""
+
+    def __init__(self, client: httpx.Client, lat: float, lon: float, *,
+                 half_deg: float = 0.5, cache: int = 5) -> None:
+        self._client = client
+        self._lat, self._lon, self._half = lat, lon, half_deg
+        self._frames: dict[str, deque[Frame]] = {p: deque(maxlen=cache) for p in PRODUCTS}
+
+    def frames(self, product: str) -> list[Frame]:
+        return list(self._frames[product])
+
+    def fetch_latest(self, product: str, now: datetime) -> Frame | None:
+        path = f"CONUS/{PRODUCTS[product]}/"
+        keys: list[str] = []
+        for prefix in day_prefixes(product, now):
+            keys += [k for k in list_keys(self._client, prefix) if k.startswith(path)]
+        key = newest_key(keys)
+        if key is None:
+            return None
+        valid_time = key_time(key)
+        history = self._frames[product]
+        if history and history[-1].valid_time == valid_time:
+            return history[-1]
+        meta, values = decode_grib(fetch_grib(self._client, key))
+        lats, lons, sub = subset(values, meta, self._lat, self._lon, self._half)
+        del values
+        frame = to_frame(product, valid_time, lats, lons, sub)
+        history.append(frame)
+        return frame

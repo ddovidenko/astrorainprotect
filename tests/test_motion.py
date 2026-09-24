@@ -70,6 +70,20 @@ def test_estimate_rejects_identical_times():
     assert estimate([f, f, f]) is None
 
 
+def test_estimate_rejects_zero_shift():
+    # identical content at distinct valid times: peak is 1.0, but there is no shift at all
+    frames = [make_frame(blob(30, 40), product="reflectivity",
+                         valid_time=T0 + timedelta(minutes=2 * k)) for k in range(3)]
+    assert estimate(frames) is None
+
+
+def test_estimate_rejects_sub_resolution_shift():
+    # total displacement of 1 cell across the whole window is below MIN_SHIFT_CELLS
+    frames = [make_frame(np.roll(blob(30, 40), (0, min(k, 1)), axis=(0, 1)), product="reflectivity",
+                         valid_time=T0 + timedelta(minutes=2 * k)) for k in range(3)]
+    assert estimate(frames) is None
+
+
 from astrorainprotect.detect import Detection  # noqa: E402
 from astrorainprotect.motion import Approach, project  # noqa: E402
 

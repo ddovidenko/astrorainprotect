@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -11,10 +12,13 @@ from astrorainprotect.detect import KM_PER_DEG, Detection
 from astrorainprotect.frame import Frame
 
 MIN_CONFIDENCE = 0.3
+MIN_SHIFT_CELLS = 2   # below this, a whole-cell phase-correlation shift is not trustworthy
 
 
 @dataclass(frozen=True)
 class Motion:
+    """Storm motion vector, from estimate(). Only returned when the shift is >= MIN_SHIFT_CELLS."""
+
     u_km_per_min: float   # eastward
     v_km_per_min: float   # northward
     confidence: float     # phase-correlation peak, 0..1
@@ -46,6 +50,13 @@ def phase_shift(a: np.ndarray, b: np.ndarray) -> tuple[int, int, float]:
 
 
 def estimate(frames: Sequence[Frame], *, min_confidence: float = MIN_CONFIDENCE) -> Motion | None:
+    """Estimate storm motion between the first and last frame, or None when motion is not known.
+
+    Returns None when there are too few frames, the frames don't line up, the phase-correlation
+    peak is too weak, or the whole-cell shift is smaller than MIN_SHIFT_CELLS: a shift that small
+    (including exactly 0) is not trustworthy motion evidence, even if the peak confidence is high,
+    since phase_shift only resolves whole-cell displacement.
+    """
     if len(frames) < 3:
         return None
     first, last = frames[0], frames[-1]
@@ -56,6 +67,8 @@ def estimate(frames: Sequence[Frame], *, min_confidence: float = MIN_CONFIDENCE)
         return None
     dy, dx, peak = phase_shift(first.values, last.values)
     if peak < min_confidence:
+        return None
+    if math.hypot(dy, dx) < MIN_SHIFT_CELLS:
         return None
     lat = float(np.mean(last.lats))
     dlat = abs(float(last.lats[0] - last.lats[1])) if len(last.lats) > 1 else 0.01

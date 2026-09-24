@@ -130,14 +130,37 @@ def test_send_failure_does_not_latch(tmp_path, caplog):
     assert any("consecutive failures: 2" in r.getMessage() for r in caplog.records)
 
 
-def test_raining_now_rearms(tmp_path):
+def test_rain_at_house_alerts_when_unlatched(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(raining("preciprate", 1.0), empty("reflectivity")))
+    line = run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    title, msg = app.notifier.sent[0]
+    assert title == "Rain incoming"
+    assert "raining at the house now" in msg
+    assert app.state.latched()
+    assert "raining_now=1" in line
+
+
+def test_rain_at_house_while_latched_skips(tmp_path):
     app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
     run_cycle(app)
     assert app.state.latched()
     app.radar.by_product["preciprate"] = raining("preciprate", 1.0)
     line = run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    assert app.state.latched()
+    assert "outcome=skip" in line
+
+
+def test_rearms_after_everything_clears(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(raining("preciprate", 1.0), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert app.state.latched()
+    app.radar.by_product["preciprate"] = empty("preciprate")
+    app.radar.by_product["reflectivity"] = empty("reflectivity")
+    line = run_cycle(app)
     assert not app.state.latched()
-    assert "re-armed" in line or "rearm" in line.lower()
+    assert "outcome=re-armed" in line
 
 
 def test_radar_unavailable_leaves_latch(tmp_path, caplog):

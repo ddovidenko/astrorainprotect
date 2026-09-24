@@ -174,10 +174,15 @@ def run_cycle(app: App) -> str:
         log.warning("radar unavailable (%s); latch untouched", reasons)
 
     triggers: list[Trigger] = []
-    raining_now = any(d.raining_now for d in dets if d.product == "preciprate")
     rt = radar_trigger(app, dets, now)
     if rt:
         triggers.append(rt)
+    wet = next((d for d in dets if d.product == "preciprate" and d.raining_now), None)
+    raining_now = wet is not None
+    if wet is not None:
+        # Rain forming in place over the house must alert (differs from the legacy re-arm).
+        triggers.append(Trigger(source="radar", eta_min=0.0,
+                                detail=f"raining at the house now ({wet.rate_at_house:.1f} mm/h)"))
 
     if app.pirate is not None:
         try:
@@ -196,11 +201,11 @@ def run_cycle(app: App) -> str:
             if pr.eta_min is not None:
                 triggers.append(Trigger("pirate weather", float(pr.eta_min), pr.detail))
 
-    if radar_ok or triggers or raining_now:
-        decision = decide(AlarmInputs(tuple(triggers), raining_now, app.state.latched(),
+    if radar_ok or triggers:
+        decision = decide(AlarmInputs(tuple(triggers), app.state.latched(),
                                       app.state.latch_age_sec(ts), cfg.repeat_min))
     else:
-        decision = decide(AlarmInputs((), False, False, None, cfg.repeat_min))   # NONE
+        decision = decide(AlarmInputs((), False, None, cfg.repeat_min))   # NONE
 
     outcome = decision.action.name.lower()
     if decision.action in (Action.SEND, Action.REPEAT):

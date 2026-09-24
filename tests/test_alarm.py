@@ -7,8 +7,11 @@ RADAR_ETA = Trigger(source="radar", eta_min=12.0, detail="reflectivity 41 dBZ, 8
 PW = Trigger(source="pirate weather", eta_min=25.0, detail="prob 60%")
 
 
-def inputs(triggers=(), raining_now=False, latched=False, latch_age_sec=None, repeat_min=0):
-    return AlarmInputs(triggers=tuple(triggers), raining_now=raining_now, latched=latched,
+RAINING = Trigger(source="radar", eta_min=0.0, detail="raining at the house now (0.3 mm/h)")
+
+
+def inputs(triggers=(), latched=False, latch_age_sec=None, repeat_min=0):
+    return AlarmInputs(triggers=tuple(triggers), latched=latched,
                        latch_age_sec=latch_age_sec, repeat_min=repeat_min)
 
 
@@ -50,13 +53,17 @@ def test_rearm_when_no_trigger():
     assert decide(inputs([], latched=True, latch_age_sec=5)).action is Action.REARM
 
 
-def test_rearm_when_raining_now_even_with_triggers():
-    d = decide(inputs([RADAR, PW], raining_now=True, latched=True, latch_age_sec=5))
-    assert d.action is Action.REARM
+def test_raining_trigger_sends_when_unlatched():
+    d = decide(inputs([RAINING]))
+    assert d.action is Action.SEND
+    assert d.title == "Rain incoming"
+    assert d.message.startswith("Rain at the house now")
+    assert "raining at the house now (0.3 mm/h)" in d.message
 
 
-def test_raining_now_unlatched_is_none():
-    assert decide(inputs([RADAR], raining_now=True, latched=False)).action is Action.NONE
+def test_raining_trigger_latched_skips():
+    d = decide(inputs([RAINING], latched=True, latch_age_sec=5))
+    assert d.action is Action.SKIP
 
 
 def test_nothing_to_do():

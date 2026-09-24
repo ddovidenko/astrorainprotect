@@ -244,12 +244,22 @@ def test_pirate_error_logged_radar_still_alerts(tmp_path, caplog):
     assert len(app.notifier.sent) == 1
 
 
-def test_pirate_raining_now_rearms(tmp_path):
+def test_pirate_raining_now_does_not_silence_radar(tmp_path):
     app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
     run_cycle(app)
+    assert app.state.latched()
+    app.pirate = FakePirate(pw(None, raining_now=True))
+    line = run_cycle(app)
+    assert app.state.latched()                        # PW "raining" changed nothing
+    assert len(app.notifier.sent) == 1
+    assert "outcome=skip" in line
+
+
+def test_pirate_raining_now_does_not_veto_first_alert(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
     app.pirate = FakePirate(pw(None, raining_now=True))
     run_cycle(app)
-    assert not app.state.latched()
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]
 
 
 def test_build_app_creates_pirate_only_with_key(tmp_path):

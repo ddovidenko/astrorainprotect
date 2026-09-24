@@ -97,16 +97,22 @@ script):
   `DEBUG=1` adds extra detail lines (which scope hosts are online, the Pirate
   Weather summary). `DEBUG=2` additionally sends a one-time test notification
   on startup, so you can confirm the ntfy path works without waiting for rain.
-- **Direction filter**: `DIRECTION_FILTER` is parsed and validated today but not
-  yet wired into the alarm decision — it will start suppressing away-moving
-  echoes once motion estimation lands.
+- **Direction filter**: with `DIRECTION_FILTER=1`, storm motion is estimated
+  from the last few reflectivity frames and the nearest qualifying echo is
+  projected along it. If its projected path does not come within
+  `max(NOW_RADIUS_KM, ALERT_RADIUS_KM / 4)` of the house inside `LOOKAHEAD_MIN`,
+  the radar trigger is dropped for that cycle (the summary line shows
+  `note=moving away`). When it will hit, the alert carries an ETA, counted
+  down by the age of the newest frame. When motion is unknown (too few
+  frames, low confidence, sub-resolution shift), the filter never suppresses:
+  plain radius alerting applies. Rain at the house always alerts.
 
 ## Reading the logs
 
 Each poll cycle ends with one summary line, for example:
 
 ```
-2026-09-23 14:32:07 INFO frame=19:31:00Z age=1.1min reflectivity=max:38.4,cells:5,nearest:12.3 km to the NW preciprate=max:0.0,cells:0,nearest:no echo in range raining_now=0 eta=none sources=radar latched=1 outcome=send
+2026-09-23 14:32:07 INFO frame=19:31:00Z age=1.1min reflectivity=max:38.4,cells:5,nearest:12.3 km to the NW preciprate=max:0.0,cells:0,nearest:no echo in range raining_now=0 eta=none sources=radar latched=1 outcome=send note=-
 ```
 
 - `frame` — UTC valid time of the newest radar frame used this cycle (`none` if
@@ -121,13 +127,16 @@ Each poll cycle ends with one summary line, for example:
 - `raining_now` — 1 if a PrecipRate cell within `NOW_RADIUS_KM` exceeds
   `RAINING_NOW`, else 0.
 - `eta` — minutes until rain from the fastest-arriving trigger, or `none` if no
-  trigger carries an ETA (radar triggers never carry one; only Pirate Weather
-  triggers do).
+  trigger carries an ETA. Pirate Weather triggers carry one; radar triggers
+  carry one when `DIRECTION_FILTER=1` and motion is known, and rain at the
+  house counts as `0min`.
 - `sources` — which trigger(s) fired this cycle (`radar`, `pirate weather`, both,
   or `none`).
 - `latched` — 1 if the alarm is currently latched (an alert is active), else 0.
 - `outcome` — what the cycle actually did: `send`, `repeat`, `skip`, `re-armed`,
   `none`, or `send-failed`.
+- `note` — `-` normally, or `moving away` when the direction filter dropped a
+  radar echo this cycle.
 
 ## Tuning
 
@@ -137,7 +146,10 @@ alarms, raise `MIN_CELLS`. During an imaging session where you want a reminder
 that rain is still active, set `REPEAT_MIN=10`. Set `DIRECTION_FILTER=1` to
 estimate storm motion from consecutive reflectivity frames and stop alerting
 on echoes that are moving away from the house; the alert includes an ETA when
-motion is known.
+motion is known. The filter projects only the nearest qualifying cell. A broad
+line moving crosswise can be suppressed until a different cell becomes
+nearest, which shortens lead time. Leave the filter off until you have
+replayed recorded storms with it on.
 
 To tune without hammering the network or ntfy, record a stretch of frames and
 replay them through the detector in dry-run mode (alerts are logged as

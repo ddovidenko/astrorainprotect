@@ -1,7 +1,7 @@
 # astrorainprotect — design spec
 
 Date: 2026-09-23
-Status: approved in conversation, pending written review
+Status: approved 2026-09-23; amended by the implementation plan (see its "Spec amendments" section)
 
 ## 1. Purpose
 
@@ -42,7 +42,7 @@ Non-goals: Home Assistant, web UI, paid APIs, general weather app features.
 | Name | `astrorainprotect` everywhere | Matches repo and GitHub remote |
 | Radar strategy | Reflectivity for "incoming", PrecipRate for "raining now"; either product can satisfy "nearby" | Reflectivity flags developing cells minutes earlier |
 | Phasing | One spec, one phased plan | Motion estimation shares the frame cache and message format; design once |
-| GRIB decoder | Decided by a throwaway spike in phase 1 (cfgrib+xarray vs pygrib on `python:3.12-slim`) | Image size and build time unknown until measured |
+| GRIB decoder | `eccodes` PyPI package used directly (bundled `eccodeslib` wheel); no cfgrib/xarray | Spike 2026-09-23: MRMS params decode as `shortName=unknown` under cfgrib; eccodes alone is 49 MB and decodes CONUS in 0.8 s |
 | S3 access | Anonymous HTTPS `?list-type=2` listing and plain GET, no boto3 | Bucket is public; boto3 adds weight for nothing |
 | Local Docker | Install Docker Engine in WSL via sudo at the container phase | Not currently installed; needed for `docker compose up --build` |
 
@@ -52,7 +52,10 @@ One Python 3.12 process, one poll loop, package `astrorainprotect`.
 
 ```
 astrorainprotect/
-  __main__.py   poll loop, wiring, logging setup
+  __main__.py   calls app.main()
+  app.py        poll loop, wiring, logging setup
+  healthcheck.py Docker HEALTHCHECK entry point (heartbeat age)
+  replay.py     REPLAY_DIR mode over recorded frames
   config.py     env → frozen Config dataclass, validation, startup print (token masked)
   mrms.py       S3 listing, newest-key selection, download, gunzip, decode, subset → Frame; frame cache
   detect.py     pure: Frame + thresholds → Detection
@@ -64,13 +67,14 @@ astrorainprotect/
   scope.py      TCP reachability of SCOPE_HOSTS
 ```
 
-Runtime dependencies: `numpy`, the GRIB decoder chosen by the spike, `httpx`.
+Runtime dependencies: `numpy`, `eccodes`, `httpx`.
 
 ### Data types
 
 - `Frame`: product name, valid time (UTC), 1-D lat and lon arrays, 2-D values
-  (mm/h or dBZ, negatives replaced by 0), `missing_fraction` (fraction of cells
-  that were negative before replacement).
+  (mm/h or dBZ, clamped to ≥ 0), `missing_fraction`. Missing is per product:
+  PrecipRate `< 0` (`-1` missing, `-3` no coverage); reflectivity `< -990`
+  (`-999` missing; `-99` means no echo and small negatives are real weak echo).
 - `Detection`: `raining_now: bool`, `rate_at_house: float`, `qualifying_cells:
   int`, `nearest_km: float | None`, `nearest_bearing_deg: float | None`,
   `max_value: float`, `product: str`.
@@ -101,11 +105,14 @@ now_threshold, nearby_threshold, min_cells) -> Detection`
 - Returns `None` when frames are insufficient, the correlation peak is weak
   (confidence below a fixed floor), or the box is mostly empty.
 
-`motion.project(detection, motion, *, alert_radius_km, lookahead_min) -> Approach`
+`motion.project(detection, motion, *, hit_radius_km, lookahead_min) -> Approach`
 
-- Projects the nearest qualifying echo forward along the motion vector and
-  reports whether its path passes within `alert_radius_km` within
-  `lookahead_min`, and the ETA to closest approach.
+- Projects the nearest qualifying echo forward along the motion vector.
+  `will_hit` is true when the path comes within `hit_radius_km` of the house
+  inside `lookahead_min`; `eta_min` is the time it first enters that radius.
+  The loop passes `hit_radius_km = max(NOW_RADIUS_KM, ALERT_RADIUS_KM / 4)`.
+  The alert radius itself cannot be the test: the nearest qualifying echo is by
+  definition already inside it.
 
 `alarm.decide(inputs: AlarmInputs) -> Action`
 
@@ -198,6 +205,7 @@ Legacy names preserved; new vars marked.
 | `PW_KEY` | empty | enables Pirate Weather trigger |
 | `MIN_PROB` | 0.3 | Pirate Weather probability threshold |
 | `REPLAY_DIR` (new) | empty | run detector over saved frames and exit |
+| `STATE_DIR` (new) | `/state` | latch/heartbeat directory; tests and local runs override it |
 | `TZ` | America/Chicago | log timestamps |
 
 Startup validates required vars and numeric ranges, prints the effective config

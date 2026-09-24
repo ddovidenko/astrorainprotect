@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from astrorainprotect.detect import KM_PER_DEG
+from astrorainprotect.detect import KM_PER_DEG, Detection
 from astrorainprotect.frame import Frame
 
 MIN_CONFIDENCE = 0.3
@@ -68,3 +68,30 @@ def estimate(frames: Sequence[Frame], *, min_confidence: float = MIN_CONFIDENCE)
         confidence=peak,
         frames_used=len(frames),
     )
+
+
+def project(detection: Detection, motion: Motion, *, hit_radius_km: float,
+            lookahead_min: float) -> Approach:
+    if detection.nearest_km is None or detection.nearest_bearing_deg is None:
+        return Approach(False, None, float("inf"))
+    b = np.radians(detection.nearest_bearing_deg)
+    px, py = detection.nearest_km * np.sin(b), detection.nearest_km * np.cos(b)   # east, north
+    vx, vy = motion.u_km_per_min, motion.v_km_per_min
+    r0 = float(np.hypot(px, py))
+    if r0 <= hit_radius_km:
+        return Approach(True, 0.0, r0)
+    v2 = vx * vx + vy * vy
+    if v2 < 1e-9:
+        return Approach(False, None, r0)
+    t_closest = float(np.clip(-(px * vx + py * vy) / v2, 0.0, lookahead_min))
+    closest = float(np.hypot(px + vx * t_closest, py + vy * t_closest))
+    if closest > hit_radius_km:
+        return Approach(False, None, closest)
+    # smallest t >= 0 with |p + v t| == hit_radius: solve v2 t^2 + 2(p.v) t + (r0^2 - R^2) = 0
+    bq = 2 * (px * vx + py * vy)
+    cq = r0 * r0 - hit_radius_km * hit_radius_km
+    disc = bq * bq - 4 * v2 * cq
+    t_enter = (-bq - np.sqrt(max(disc, 0.0))) / (2 * v2)
+    if t_enter < 0 or t_enter > lookahead_min:
+        return Approach(False, None, closest)
+    return Approach(True, float(t_enter), closest)

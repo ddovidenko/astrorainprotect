@@ -18,6 +18,7 @@ from astrorainprotect.alarm import Action, AlarmInputs, Trigger, decide
 from astrorainprotect.config import Config, ConfigError, describe, load_config
 from astrorainprotect.detect import Detection, detect
 from astrorainprotect.frame import Frame
+from astrorainprotect.motion import estimate, project
 from astrorainprotect.mrms import MrmsError, RadarSource
 from astrorainprotect.notify import Notifier
 from astrorainprotect.pirate import PirateError, PirateSource
@@ -58,6 +59,7 @@ class App:
     pirate: Any           # PirateSource (Task 14) or None
     clock: Callable[[], datetime]
     failures: dict[str, int] | None = None
+    last_note: str = ""
 
     def __post_init__(self) -> None:
         if self.failures is None:
@@ -84,15 +86,35 @@ def _detect_product(
 
 
 def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | None:
-    """Build the radar Trigger from qualifying detections. Task 19 adds the direction filter."""
+    """Build the radar Trigger from qualifying detections, applying the direction filter."""
     hits = [d for d in dets if d.nearby]
     if not hits:
         return None
+    cfg = app.cfg
     units = {"reflectivity": "dBZ", "preciprate": "mm/h"}
     detail = ", ".join(
         f"{d.product} {d.max_value:.0f} {units[d.product]} {d.describe()}" for d in hits
     )
-    return Trigger(source="radar", eta_min=None, detail=detail)
+    eta: float | None = None
+    if cfg.direction_filter:
+        refl = next((d for d in hits if d.product == "reflectivity"), None)
+        m = estimate(app.radar.frames("reflectivity")) if refl is not None else None
+        if refl is not None and m is not None:
+            a = project(refl, m, hit_radius_km=max(cfg.now_radius_km, cfg.alert_radius_km / 4),
+                        lookahead_min=cfg.lookahead_min)
+            if not a.will_hit:
+                log.info(
+                    "radar echo moving away (closest approach %.1f km, motion %.1f/%.1f "
+                    "km/min, conf %.2f); not alerting",
+                    a.closest_km, m.u_km_per_min, m.v_km_per_min, m.confidence,
+                )
+                app.last_note = "moving away"
+                return None
+            eta = a.eta_min
+            detail += f", eta {a.eta_min:.0f} min"
+        elif cfg.debug >= 1:
+            log.info("DEBUG direction filter: motion unknown, plain radius alerting")
+    return Trigger(source="radar", eta_min=eta, detail=detail)
 
 
 def _maybe_send_test(app: App) -> None:
@@ -110,6 +132,7 @@ def _maybe_send_test(app: App) -> None:
 def run_cycle(app: App) -> str:
     cfg, now = app.cfg, app.clock()
     ts = now.timestamp()
+    app.last_note = ""
 
     if cfg.scope_hosts:
         online = app.scope_check()
@@ -212,7 +235,7 @@ def run_cycle(app: App) -> str:
     line = (f"frame={frame_txt} age={age_txt} {per_product} raining_now={int(raining_now)} "
             f"eta={'none' if eta_txt is None else f'{eta_txt:.0f}min'} "
             f"sources={','.join(t.source for t in triggers) or 'none'} "
-            f"latched={int(app.state.latched())} outcome={outcome}")
+            f"latched={int(app.state.latched())} outcome={outcome} note={app.last_note or '-'}")
     log.info(line)
     app.state.heartbeat(ts)
     return line

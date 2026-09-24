@@ -68,3 +68,54 @@ def test_estimate_rejects_empty_frames():
 def test_estimate_rejects_identical_times():
     f = make_frame(blob(30, 40), product="reflectivity", valid_time=T0)
     assert estimate([f, f, f]) is None
+
+
+from astrorainprotect.detect import Detection  # noqa: E402
+from astrorainprotect.motion import Approach, project  # noqa: E402
+
+
+def det(km, bearing):
+    return Detection("reflectivity", False, 0.0, 9, True, km, bearing, 40.0)
+
+
+def test_project_toward_house():
+    # echo 12 km to the SW (bearing 225), moving NE at 1 km/min
+    m = Motion(u_km_per_min=np.sin(np.radians(45)), v_km_per_min=np.cos(np.radians(45)),
+               confidence=1, frames_used=3)
+    a = project(det(12.0, 225.0), m, hit_radius_km=5.0, lookahead_min=60)
+    assert isinstance(a, Approach)
+    assert a.will_hit
+    assert a.eta_min == pytest.approx(7.0, abs=0.1)
+    assert a.closest_km == pytest.approx(0.0, abs=1e-6)
+
+
+def test_project_moving_away():
+    m = Motion(u_km_per_min=-0.7, v_km_per_min=-0.7, confidence=1, frames_used=3)   # SW-bound
+    a = project(det(12.0, 225.0), m, hit_radius_km=5.0, lookahead_min=60)
+    assert not a.will_hit and a.eta_min is None
+    assert a.closest_km == pytest.approx(12.0)
+
+
+def test_project_passes_wide():
+    # echo 10 km due south, moving due east: closest approach is 10 km, outside 5 km
+    m = Motion(u_km_per_min=1.0, v_km_per_min=0.0, confidence=1, frames_used=3)
+    a = project(det(10.0, 180.0), m, hit_radius_km=5.0, lookahead_min=60)
+    assert not a.will_hit and a.closest_km == pytest.approx(10.0)
+
+
+def test_project_too_slow_for_lookahead():
+    m = Motion(u_km_per_min=0.0, v_km_per_min=0.1, confidence=1, frames_used=3)   # 6 km/h north
+    a = project(det(15.0, 180.0), m, hit_radius_km=5.0, lookahead_min=60)
+    assert not a.will_hit
+
+
+def test_project_already_inside():
+    m = Motion(u_km_per_min=0.0, v_km_per_min=0.0, confidence=1, frames_used=3)
+    a = project(det(2.0, 90.0), m, hit_radius_km=5.0, lookahead_min=60)
+    assert a.will_hit and a.eta_min == 0.0
+
+
+def test_project_stationary_outside():
+    m = Motion(u_km_per_min=0.0, v_km_per_min=0.0, confidence=1, frames_used=3)
+    a = project(det(8.0, 90.0), m, hit_radius_km=5.0, lookahead_min=60)
+    assert not a.will_hit and a.closest_km == pytest.approx(8.0)

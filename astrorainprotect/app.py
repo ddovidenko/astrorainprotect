@@ -20,6 +20,7 @@ from astrorainprotect.detect import Detection, detect
 from astrorainprotect.frame import Frame
 from astrorainprotect.mrms import MrmsError, RadarSource
 from astrorainprotect.notify import Notifier
+from astrorainprotect.pirate import PirateError, PirateSource
 from astrorainprotect.scope import online_hosts, parse_hosts
 from astrorainprotect.state import State
 
@@ -157,7 +158,7 @@ def run_cycle(app: App) -> str:
         try:
             pr = app.pirate.check(now)
             app.failures["pirate"] = 0
-        except Exception as exc:  # PirateError; imported lazily in Task 14
+        except PirateError as exc:
             app.failures["pirate"] += 1
             log.error(
                 "ERROR pirate weather: %s (consecutive failures: %d)",
@@ -165,6 +166,8 @@ def run_cycle(app: App) -> str:
             )
             pr = None
         if pr is not None:
+            if cfg.debug >= 1:
+                log.info("DEBUG pirate: %s", pr.summary())
             if pr.raining_now:
                 raining_now = True
             if pr.eta_min is not None:
@@ -230,7 +233,9 @@ def build_app(cfg: Config) -> App:
         notifier=Notifier(client, cfg.ntfy_url, cfg.ntfy_token, cfg.ntfy_priority),
         state=State(cfg.state_dir),
         scope_check=lambda: online_hosts(hosts),
-        pirate=None,
+        pirate=(PirateSource(client, cfg.pw_key, cfg.lat, cfg.lon, lookahead_min=cfg.lookahead_min,
+                             min_prob=cfg.min_prob, min_intensity=cfg.min_intensity,
+                             raining_now=cfg.raining_now) if cfg.pw_key else None),
         clock=lambda: datetime.now(UTC),
     )
 

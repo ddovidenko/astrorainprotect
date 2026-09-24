@@ -78,7 +78,7 @@ def test_message_uses_smallest_eta_and_lists_sources():
 
 def test_message_without_eta_uses_detail():
     msg = compose_message((RADAR,))
-    assert msg.startswith("Rain nearby: reflectivity 41 dBZ, 8.2 km to the SW")
+    assert msg.startswith("Rain nearby: radar: reflectivity 41 dBZ, 8.2 km to the SW")
 
 
 def test_decision_is_frozen():

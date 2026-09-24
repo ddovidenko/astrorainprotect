@@ -43,11 +43,6 @@ TITLE_REPEAT = "Rain incoming (still)"
 
 def compose_message(triggers: tuple[Trigger, ...]) -> str:
     etas = [t.eta_min for t in triggers if t.eta_min is not None]
-    if len(triggers) == 1:
-        detail = triggers[0].detail
-        if etas:
-            return f"Rain expected in about {round(min(etas))} min ({detail})"
-        return f"Rain nearby: {detail}"
     sources = "; ".join(f"{t.source}: {t.detail}" for t in triggers)
     if etas:
         return f"Rain expected in about {round(min(etas))} min ({sources})"

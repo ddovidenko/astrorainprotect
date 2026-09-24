@@ -14,14 +14,15 @@ BASE = {"LAT": "29.97", "LON": "-95.67", "NTFY_URL": "https://ntfy.example.net/r
 
 
 class FakeRadar:
-    def __init__(self, preciprate=None, reflectivity=None, error=None):
+    def __init__(self, preciprate=None, reflectivity=None, error=None, error_for=None):
         self.by_product = {"preciprate": preciprate, "reflectivity": reflectivity}
         self.error = error
+        self.error_for = error_for            # raise only for this product, when set
         self.calls = 0
 
     def fetch_latest(self, product, now):
         self.calls += 1
-        if self.error:
+        if self.error and (self.error_for is None or self.error_for == product):
             raise self.error
         return self.by_product[product]
 
@@ -191,6 +192,19 @@ def test_radar_error_is_logged_and_loop_continues(tmp_path, caplog):
     line = run_cycle(app)
     assert any("S3 listing failed" in r.getMessage() for r in caplog.records)
     assert "radar=unavailable" in line
+
+
+def test_one_product_error_keeps_other_trigger(tmp_path, caplog):
+    from astrorainprotect.mrms import MrmsError
+    caplog.set_level(logging.ERROR)
+    radar = FakeRadar(empty("preciprate"), storm("reflectivity", 40.0),
+                      error=MrmsError("preciprate GET failed"), error_for="preciprate")
+    app = build(tmp_path, radar=radar)
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert any("preciprate GET failed" in m and "consecutive failures: 1" in m for m in errors)
+    assert app.failures["radar"] == 1
 
 
 def test_scope_offline_skips_and_clears_latch(tmp_path, caplog):

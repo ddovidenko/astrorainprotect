@@ -5,6 +5,7 @@ import numpy as np
 
 from astrorainprotect.app import RADAR_MAX_AGE, App, radar_status, run_cycle
 from astrorainprotect.config import load_config
+from astrorainprotect.pirate import PirateError, PirateResult
 from astrorainprotect.state import State
 from tests.conftest import make_frame
 
@@ -209,3 +210,52 @@ def test_main_missing_env_exits_nonzero(monkeypatch, capsys):
     monkeypatch.setattr("os.environ", {})
     assert main([]) == 2
     assert "LAT is required" in capsys.readouterr().err
+
+
+class FakePirate:
+    def __init__(self, result=None, error=None):
+        self.result, self.error, self.calls = result, error, 0
+
+    def check(self, now):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.result
+
+
+def pw(eta, raining_now=False):
+    return PirateResult(raining_now, 0.0, 70, 1.2, eta, 60, "prob 70%", 60)
+
+
+def test_pirate_trigger_alone_sends(tmp_path):
+    app = build(tmp_path)
+    app.pirate = FakePirate(pw(15))
+    run_cycle(app)
+    assert app.notifier.sent[0][1].startswith("Rain expected in about 15 min")
+    assert "pirate weather" in app.notifier.sent[0][1]
+
+
+def test_pirate_error_logged_radar_still_alerts(tmp_path, caplog):
+    caplog.set_level(logging.ERROR)
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    app.pirate = FakePirate(error=PirateError("HTTP 429"))
+    run_cycle(app)
+    assert any("HTTP 429" in r.getMessage() for r in caplog.records)
+    assert len(app.notifier.sent) == 1
+
+
+def test_pirate_raining_now_rearms(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    app.pirate = FakePirate(pw(None, raining_now=True))
+    run_cycle(app)
+    assert not app.state.latched()
+
+
+def test_build_app_creates_pirate_only_with_key(tmp_path):
+    from astrorainprotect.app import build_app
+    from astrorainprotect.pirate import PirateSource
+    cfg = load_config({**BASE, "STATE_DIR": str(tmp_path)})
+    assert build_app(cfg).pirate is None
+    cfg = load_config({**BASE, "STATE_DIR": str(tmp_path), "PW_KEY": "k"})
+    assert isinstance(build_app(cfg).pirate, PirateSource)

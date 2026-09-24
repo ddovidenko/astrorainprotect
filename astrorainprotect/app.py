@@ -100,7 +100,9 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
         refl = next((d for d in hits if d.product == "reflectivity"), None)
         m = estimate(app.radar.frames("reflectivity")) if refl is not None else None
         if refl is not None and m is not None:
-            a = project(refl, m, hit_radius_km=max(cfg.now_radius_km, cfg.alert_radius_km / 4),
+            nearest_hit = min(hits, key=lambda d: d.nearest_km)
+            a = project(nearest_hit, m,
+                        hit_radius_km=max(cfg.now_radius_km, cfg.alert_radius_km / 4),
                         lookahead_min=cfg.lookahead_min)
             if not a.will_hit:
                 log.info(

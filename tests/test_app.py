@@ -270,8 +270,8 @@ def moving_storm(k, toward=True):
 
 
 class HistoryRadar(FakeRadar):
-    def __init__(self, frames):
-        super().__init__(empty("preciprate"), frames[-1])
+    def __init__(self, frames, preciprate=None):
+        super().__init__(preciprate if preciprate is not None else empty("preciprate"), frames[-1])
         self._hist = frames
 
     def frames(self, product):
@@ -305,5 +305,17 @@ def test_direction_filter_falls_back_without_history(tmp_path):
 def test_direction_filter_off_ignores_motion(tmp_path):
     radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)])
     app = build(tmp_path, radar=radar)
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1
+
+
+def test_direction_filter_does_not_suppress_preciprate_hit(tmp_path):
+    # reflectivity recedes (would be suppressed alone), but a qualifying PrecipRate echo
+    # ~4 km south of the house (outside NOW_RADIUS_KM, so not "raining now") must still alert.
+    g = np.zeros((101, 101), dtype=np.float32)
+    g[54:57, 50] = 1.0
+    precip = make_frame(g, product="preciprate", valid_time=NOW - timedelta(minutes=2))
+    radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)], preciprate=precip)
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
     run_cycle(app)
     assert len(app.notifier.sent) == 1

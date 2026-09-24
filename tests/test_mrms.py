@@ -201,6 +201,18 @@ def test_fetch_grib_bad_gzip():
         fetch_grib(client, "CONUS/x/y.grib2.gz")
 
 
+@pytest.mark.parametrize("body", [
+    b"\x1f\x8b" + b"garbage",                             # gzip magic, then junk (EOFError)
+    b"\x1f\x8b\x08\x00" + b"\x00" * 4 + b"\x00\xff" + b"garbage-deflate",  # zlib.error
+])
+def test_fetch_grib_corrupt_gzip_body(body):
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, content=body))
+    )
+    with pytest.raises(MrmsError, match="gunzip"):
+        fetch_grib(client, "CONUS/x/y.grib2.gz")
+
+
 def test_decode_garbage():
     with pytest.raises(MrmsError, match="decode"):
         decode_grib(b"not a grib")

@@ -192,7 +192,7 @@ variables carry over.
   frames so tuning does not require waiting for weather.
 - `docker compose up --build` must work locally with a `.env`.
 - CI builds a multi-arch (amd64 at minimum) image and pushes
-  `ghcr.io/<owner>/astrorainprotect:latest` and a git-sha tag.
+  `ghcr.io/ddovidenko/astrorainprotect:latest` and a git-sha tag.
 - `portainer-stack.yml` references the GHCR image and only needs the env vars
   and a `/opt/astrorainprotect/state:/state` volume. Deployed as a Portainer
   Git stack pointing at this repo, with auto-update on push if convenient.

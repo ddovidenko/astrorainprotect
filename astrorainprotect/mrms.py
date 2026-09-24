@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import re
 import xml.etree.ElementTree as ET
+import zlib
 from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -96,7 +97,7 @@ def fetch_grib(client: httpx.Client, key: str) -> bytes:
         raise MrmsError(f"S3 download returned HTTP {r.status_code} for {key}")
     try:
         return gzip.decompress(r.content)
-    except (OSError, EOFError) as exc:
+    except (OSError, EOFError, zlib.error) as exc:
         raise MrmsError(f"gunzip failed for {key}: {exc}") from exc
 
 

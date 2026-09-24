@@ -193,8 +193,6 @@ def run_cycle(app: App) -> str:
         if pr is not None:
             if cfg.debug >= 1:
                 log.info("DEBUG pirate: %s", pr.summary())
-            if pr.raining_now:
-                raining_now = True
             if pr.eta_min is not None:
                 triggers.append(Trigger("pirate weather", float(pr.eta_min), pr.detail))
 

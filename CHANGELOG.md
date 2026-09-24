@@ -13,3 +13,5 @@ Keep a Changelog; versions follow SemVer.
 - Docker image (python:3.12-slim, non-root, heartbeat HEALTHCHECK), measured size: 506 MB.
 - GitHub Actions CI: ruff + pytest on PRs, image push to ghcr.io/ddovidenko/astrorainprotect on main.
 - Portainer Git stack file.
+- DIRECTION_FILTER=1: storm motion from consecutive reflectivity frames; echoes moving away do not alert, ETA reported when known.
+- scripts/record_frames.py and REPLAY_DIR for tuning against recorded frames.

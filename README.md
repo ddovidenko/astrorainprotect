@@ -127,9 +127,19 @@ Each poll cycle ends with one summary line, for example:
 Start with the defaults. If alerts feel late, lower `MIN_DBZ` to `25` for
 earlier — but noisier — alerts. If single-pixel radar noise is triggering false
 alarms, raise `MIN_CELLS`. During an imaging session where you want a reminder
-that rain is still active, set `REPEAT_MIN=10`. Once phase 6 (motion
-estimation) lands, set `DIRECTION_FILTER=1` to stop alerting on echoes that are
-moving away from the house.
+that rain is still active, set `REPEAT_MIN=10`. Set `DIRECTION_FILTER=1` to
+estimate storm motion from consecutive reflectivity frames and stop alerting
+on echoes that are moving away from the house; the alert includes an ETA when
+motion is known.
+
+To tune without hammering the network or ntfy, record a stretch of frames and
+replay them through the detector in dry-run mode (alerts are logged as
+`WOULD SEND ...` instead of being sent):
+
+```
+LAT=.. LON=.. .venv/bin/python scripts/record_frames.py frames/ --minutes 60
+LAT=.. LON=.. NTFY_URL=x REPLAY_DIR=frames/ DIRECTION_FILTER=1 .venv/bin/python -m astrorainprotect
+```
 
 ## Gotchas
 

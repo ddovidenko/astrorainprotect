@@ -45,6 +45,7 @@ Non-goals: Home Assistant, web UI, paid APIs, general weather app features.
 | GRIB decoder | `eccodes` PyPI package used directly (bundled `eccodeslib` wheel); no cfgrib/xarray | Spike 2026-09-23: MRMS params decode as `shortName=unknown` under cfgrib; eccodes alone is 49 MB and decodes CONUS in 0.8 s |
 | S3 access | Anonymous HTTPS `?list-type=2` listing and plain GET, no boto3 | Bucket is public; boto3 adds weight for nothing |
 | Local Docker | Install Docker Engine in WSL via sudo at the container phase | Not currently installed; needed for `docker compose up --build` |
+| Rain at the house | Alerts (ETA 0) instead of re-arming | Final review 2026-09-23: legacy rule silenced in-place convection |
 
 ## 4. Architecture
 
@@ -116,13 +117,16 @@ now_threshold, nearby_threshold, min_cells) -> Detection`
 
 `alarm.decide(inputs: AlarmInputs) -> Action`
 
-Ported exactly from `legacy/rain-check.sh`. In the shell script, "already
-raining" empties `eta`, which then re-arms the latch; the same rule applies
-here:
+Ported from `legacy/rain-check.sh`, with one deliberate change (amended in
+the final review, 2026-09-23). In the shell script, "already raining" empties
+`eta`, which then re-arms the latch; that rule silenced cells forming in place
+over the house, so it is not carried over:
 
-- If `raining_now` is true, every trigger is treated as inactive for this
-  cycle. There is nothing left to warn about, and clearing the latch means the
-  next approaching cell alerts again.
+- Raining at the house (PrecipRate within `NOW_RADIUS_KM` ≥ `RAINING_NOW`) is a
+  radar trigger with ETA 0 (message headline "Rain at the house now (...)"). It
+  sends, skips or repeats like any other trigger. `REARM` happens only when no
+  trigger remains. Pirate Weather's "raining now" produces no trigger and never
+  suppresses one.
 - Any active trigger and no latch → `SEND`.
 - Any active trigger, latch present, `REPEAT_MIN > 0`, latch age ≥ `REPEAT_MIN`
   minutes → `REPEAT` (title "Rain incoming (still)"; touching the latch resets
@@ -150,7 +154,8 @@ Every `POLL_SEC` seconds:
 3. **Radar availability.** Radar is unavailable this cycle if the newest frame
    is older than 15 minutes or `missing_fraction > 0.5`. Log a warning; radar
    triggers are treated as inactive but the latch is not touched.
-4. **Detect.** Raining now: PrecipRate within `NOW_RADIUS_KM` ≥ `RAINING_NOW`.
+4. **Detect.** Raining now: PrecipRate within `NOW_RADIUS_KM` ≥ `RAINING_NOW`
+   (adds a radar trigger with ETA 0).
    Nearby: reflectivity ≥ `MIN_DBZ` with `MIN_CELLS`, or PrecipRate ≥
    `MIN_INTENSITY` with `MIN_CELLS`. Either satisfies the radar trigger; the
    message names the product(s).
@@ -244,8 +249,8 @@ Unit tests (pytest, no network):
   recovers the vector; ETA for a blob moving toward the house; `will_hit`
   false for a blob moving away; returns `None` for two frames or an empty box.
 - `alarm`: table covering first send, skip while latched, repeat after
-  `REPEAT_MIN`, no repeat when `REPEAT_MIN=0`, rearm when raining now, rearm
-  when no trigger, direction-filter suppression, and no suppression when
+  `REPEAT_MIN`, no repeat when `REPEAT_MIN=0`, send on rain at the house
+  (ETA 0), skip it while latched, rearm when no trigger, direction-filter suppression, and no suppression when
   motion is `None`.
 - `config`: defaults, required-var failure, range validation, masking.
 - `pirate`: ETA and summary computed from a captured Pirate Weather JSON

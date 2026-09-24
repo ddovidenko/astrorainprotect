@@ -15,3 +15,6 @@ Keep a Changelog; versions follow SemVer.
 - Portainer Git stack file.
 - DIRECTION_FILTER=1: storm motion from consecutive reflectivity frames; echoes moving away do not alert, ETA reported when known.
 - scripts/record_frames.py and REPLAY_DIR for tuning against recorded frames.
+
+### Changed
+- Rain detected at the house now raises an alert instead of silently re-arming (differs from legacy).

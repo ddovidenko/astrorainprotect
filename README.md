@@ -77,11 +77,18 @@ script):
 - **Repeat**: with `REPEAT_MIN > 0`, a "still raining" repeat alert is sent once
   the latch has been active for at least that many minutes; with the default
   `REPEAT_MIN=0`, there is no repeat, ever.
-- **Rearm**: once rain is no longer triggering (and it isn't already raining at
-  the house) the latch clears, so the next qualifying cell can alert again. If
-  it's already raining at the house (`raining_now`), no new alert fires even
-  without a latch — there's nothing left to warn about — and the latch clears
-  so the next event can trigger cleanly.
+- **Rain at the house**: if PrecipRate within `NOW_RADIUS_KM` reaches
+  `RAINING_NOW` (`raining_now=1`), that is itself a radar trigger with an ETA of
+  0. Unlatched, it sends "Rain at the house now (...)"; latched, it is skipped
+  like any other trigger (or repeated under `REPEAT_MIN`). This is a deliberate
+  departure from the legacy script, which treated rain at the house as "nothing
+  left to warn about" and silently re-armed: a cell that pops up directly over
+  the house — in-place convection, the case this project exists for — would
+  never have produced an alert. Pirate Weather's own "raining now" never
+  silences a radar trigger.
+- **Rearm**: once no trigger remains (nothing nearby, nothing at the house, no
+  Pirate Weather ETA) the latch clears, so the next qualifying cell can alert
+  again.
 - **Scope gate**: if `SCOPE_HOSTS` is set, the cycle first checks whether any of
   those hosts are online (e.g. the Seestar's Wi-Fi). If none are, the latch is
   cleared and the cycle skips radar/Pirate Weather checks entirely for that

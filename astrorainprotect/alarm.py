@@ -24,7 +24,6 @@ class Trigger:
 @dataclass(frozen=True)
 class AlarmInputs:
     triggers: tuple[Trigger, ...]
-    raining_now: bool
     latched: bool
     latch_age_sec: float | None
     repeat_min: int
@@ -44,14 +43,17 @@ TITLE_REPEAT = "Rain incoming (still)"
 def compose_message(triggers: tuple[Trigger, ...]) -> str:
     etas = [t.eta_min for t in triggers if t.eta_min is not None]
     sources = "; ".join(f"{t.source}: {t.detail}" for t in triggers)
+    if etas and min(etas) < 0.5:
+        return f"Rain at the house now ({sources})"
     if etas:
         return f"Rain expected in about {round(min(etas))} min ({sources})"
     return f"Rain nearby: {sources}"
 
 
 def decide(inputs: AlarmInputs) -> Decision:
-    # Already raining: nothing left to warn about. Clearing the latch lets the next cell alert.
-    active = () if inputs.raining_now else inputs.triggers
+    # Rain at the house arrives as a trigger with ETA 0, so it alerts like any other trigger.
+    # The latch clears only once no trigger remains.
+    active = inputs.triggers
     if active:
         if not inputs.latched:
             return Decision(Action.SEND, TITLE_FIRST, compose_message(active))

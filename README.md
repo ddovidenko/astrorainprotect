@@ -2,11 +2,17 @@
 
 ## What it does
 
-astrorainprotect is a self-hosted rain alarm for a house in Cypress (NW Houston),
-Texas. It watches NOAA MRMS radar (reflectivity and PrecipRate) near a fixed
-`LAT,LON`, keeps Pirate Weather as a secondary trigger for organized systems, and
-pushes a notification to an iPhone via ntfy when rain is heading for the house —
-early enough to bring in ZWO Seestar telescopes left outside overnight.
+astrorainprotect is a self-hosted rain alarm. Point it at a location, and it
+watches NOAA MRMS radar (reflectivity and PrecipRate) around that `LAT,LON`,
+keeps Pirate Weather as a secondary trigger for organized systems, and pushes a
+notification through [ntfy](https://ntfy.sh) (iOS or Android app, or any ntfy
+client) when rain is heading your way. It was built to give enough lead time to
+bring in telescopes left outside overnight, but nothing in it is specific to
+that: it is an alarm for anything you would rather not leave out in the rain.
+
+It works anywhere inside MRMS coverage, which is the contiguous United States
+(roughly 20–55 N, 130–60 W). All settings come from environment variables; the
+only state it keeps is a small directory with the alert latch and a heartbeat.
 
 ## Quick start (Portainer)
 
@@ -50,7 +56,7 @@ Legacy names preserved; new vars marked.
 | `MIN_INTENSITY` | 0.2 | mm/h for a PrecipRate cell to count |
 | `MIN_DBZ` (new) | 30 | dBZ for a reflectivity cell to count |
 | `MIN_CELLS` | 3 | qualifying cells needed |
-| `RAINING_NOW` | 0.05 | mm/h at the house = already raining |
+| `RAINING_NOW` | 0.05 | mm/h at the site = already raining |
 | `DIRECTION_FILTER` | 0 | 1 = ignore echoes moving away |
 | `LOOKAHEAD_MIN` | 60 | projection horizon, also Pirate Weather window |
 | `REPEAT_MIN` | 0 | repeat interval while active |
@@ -77,22 +83,22 @@ script):
 - **Repeat**: with `REPEAT_MIN > 0`, a "still raining" repeat alert is sent once
   the latch has been active for at least that many minutes; with the default
   `REPEAT_MIN=0`, there is no repeat, ever.
-- **Rain at the house**: if PrecipRate within `NOW_RADIUS_KM` reaches
+- **Rain at the site**: if PrecipRate within `NOW_RADIUS_KM` reaches
   `RAINING_NOW` (`raining_now=1`), that is itself a trigger (source `house`,
   ETA 0). Unlatched, it sends a notification titled "Currently raining" with the
   body "Currently raining at the house (0.8 mm/h)", followed by any other active
   source; latched, it is skipped like any other trigger (or repeated under
   `REPEAT_MIN` as "Currently raining (still)"). This is a deliberate
-  departure from the legacy script, which treated rain at the house as "nothing
-  left to warn about" and silently re-armed: a cell that pops up directly over
-  the house — in-place convection, the case this project exists for — would
+  departure from the legacy script, which treated rain at the site as "nothing
+  left to warn about" and silently re-armed: a cell that pops up directly
+  overhead — in-place convection, the case this project exists for — would
   never have produced an alert. Pirate Weather's own "raining now" never
   silences a radar trigger.
-- **Rearm**: once no trigger remains (nothing nearby, nothing at the house, no
+- **Rearm**: once no trigger remains (nothing nearby, nothing overhead, no
   Pirate Weather ETA) the latch clears, so the next qualifying cell can alert
   again.
 - **Scope gate**: if `SCOPE_HOSTS` is set, the cycle first checks whether any of
-  those hosts are online (e.g. the Seestar's Wi-Fi). If none are, the latch is
+  those hosts are online (for example a smart telescope's JSON-RPC port). If none are, the latch is
   cleared and the cycle skips radar/Pirate Weather checks entirely for that
   poll — nothing outside is at risk to protect.
 - **DEBUG levels**: `DEBUG=0` is silent apart from normal INFO logging.
@@ -105,12 +111,12 @@ script):
 - **Direction filter**: with `DIRECTION_FILTER=1`, storm motion is estimated
   from the last few reflectivity frames and the nearest qualifying echo is
   projected along it. If its projected path does not come within
-  `max(NOW_RADIUS_KM, ALERT_RADIUS_KM / 4)` of the house inside `LOOKAHEAD_MIN`,
+  `max(NOW_RADIUS_KM, ALERT_RADIUS_KM / 4)` of the site inside `LOOKAHEAD_MIN`,
   the radar trigger is dropped for that cycle (the summary line shows
   `note=moving away`). When it will hit, the alert carries an ETA, counted
   down by the age of the newest frame. When motion is unknown (too few
   frames, low confidence, sub-resolution shift), the filter never suppresses:
-  plain radius alerting applies. Rain at the house always alerts.
+  plain radius alerting applies. Rain at the site always alerts.
 
 ## Reading the logs
 
@@ -150,7 +156,7 @@ earlier — but noisier — alerts. If single-pixel radar noise is triggering fa
 alarms, raise `MIN_CELLS`. During an imaging session where you want a reminder
 that rain is still active, set `REPEAT_MIN=10`. Set `DIRECTION_FILTER=1` to
 estimate storm motion from consecutive reflectivity frames and stop alerting
-on echoes that are moving away from the house; the alert includes an ETA when
+on echoes that are moving away from the site; the alert includes an ETA when
 motion is known. The filter projects only the nearest qualifying cell. A broad
 line moving crosswise can be suppressed until a different cell becomes
 nearest, which shortens lead time. Leave the filter off until you have
@@ -158,7 +164,8 @@ replayed recorded storms with it on.
 
 To tune without hammering the network or ntfy, record a stretch of frames and
 replay them through the detector in dry-run mode (alerts are logged as
-`WOULD SEND ...` instead of being sent):
+`WOULD SEND ...` instead of being sent). Recorded frames are a subset around
+your own coordinates and stay local; `frames/` is gitignored.
 
 ```
 LAT=.. LON=.. .venv/bin/python scripts/record_frames.py frames/ --minutes 60
@@ -169,7 +176,7 @@ LAT=.. LON=.. NTFY_URL=x REPLAY_DIR=frames/ DIRECTION_FILTER=1 .venv/bin/python 
 
 - ntfy: the topic is the last path segment of `NTFY_URL`; the token is a
   separate `tk_...` credential. Do not conflate them.
-- ntfy iOS app has had a bug where notifications arrive silent; not something
+- The ntfy iOS app has had a bug where notifications arrive silent; not something
   this project can fix. `Priority` and emoji tags do not control sound.
 - Portainer's web-editor stacks cannot `build:`; hence the GHCR image.
 - Docker creates a *directory* if a bind-mounted file path is missing on the

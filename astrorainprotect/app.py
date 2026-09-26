@@ -30,6 +30,7 @@ log = logging.getLogger("astrorainprotect")
 RADAR_MAX_AGE = timedelta(minutes=15)
 RADAR_MAX_MISSING = 0.5
 TITLE_TEST = "Rain alert test"
+RADAR_FAILURE_KINDS = ("listing", "download", "decode", "fetch")
 
 
 @dataclass(frozen=True)
@@ -63,7 +64,8 @@ class App:
 
     def __post_init__(self) -> None:
         if self.failures is None:
-            self.failures = {"radar": 0, "pirate": 0, "ntfy": 0}
+            self.failures = {f"radar.{k}": 0 for k in RADAR_FAILURE_KINDS}
+            self.failures.update(pirate=0, ntfy=0)
 
 
 def _detect_product(
@@ -111,7 +113,7 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
                     "km/min, conf %.2f); not alerting",
                     a.closest_km, m.u_km_per_min, m.v_km_per_min, m.confidence,
                 )
-                app.last_note = "moving away"
+                app.last_note = "reflectivity moving away"
                 return None
             # The projection runs from the frame's valid time; count down the frame's age so
             # the message says how long from now. will_hit above stays on the raw projection.
@@ -157,7 +159,8 @@ def run_cycle(app: App) -> str:
     if online is not None:
         if not online:
             app.state.clear_latch()
-            line = f"no scope online ({cfg.scope_hosts}), not checking"
+            line = (f"frame=none age=n/a radar=skipped raining_now=0 eta=none sources=none "
+                    f"latched=0 outcome=scope-offline note=no scope online ({cfg.scope_hosts})")
             log.info(line)
             app.state.heartbeat(ts)
             return line
@@ -167,17 +170,18 @@ def run_cycle(app: App) -> str:
     dets: list[Detection] = []
     statuses: dict[str, RadarStatus] = {}
     newest: Frame | None = None
-    fetch_errors = 0
+    failed_kinds: set[str] = set()
     for product in ("reflectivity", "preciprate"):
         # Per product: one product failing must not discard the other's trigger.
         try:
             d, status = _detect_product(app, product, now)
         except MrmsError as exc:
-            fetch_errors += 1
+            kind = exc.kind if exc.kind in RADAR_FAILURE_KINDS else "fetch"
+            failed_kinds.add(kind)
             statuses[product] = RadarStatus(False, f"fetch failed: {exc}")
-            app.failures["radar"] += 1
-            log.error("ERROR radar %s: %s (consecutive failures: %d)",
-                      product, exc, app.failures["radar"])
+            app.failures[f"radar.{kind}"] += 1
+            log.error("ERROR radar %s %s: %s (consecutive failures: %d)",
+                      kind, product, exc, app.failures[f"radar.{kind}"])
             continue
         statuses[product] = status
         if d is not None:
@@ -185,8 +189,9 @@ def run_cycle(app: App) -> str:
         frames = app.radar.frames(product)
         if frames and (newest is None or frames[-1].valid_time > newest.valid_time):
             newest = frames[-1]
-    if fetch_errors == 0:
-        app.failures["radar"] = 0
+    for kind in RADAR_FAILURE_KINDS:
+        if kind not in failed_kinds:
+            app.failures[f"radar.{kind}"] = 0
 
     radar_ok = len(statuses) == 2 and all(s.available for s in statuses.values())
     if not radar_ok:

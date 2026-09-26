@@ -350,3 +350,21 @@ def _listing_page(keys, truncated=False, token=None):
         extra = "<IsTruncated>false</IsTruncated>"
     ns = "http://s3.amazonaws.com/doc/2006-03-01/"
     return f'<?xml version="1.0"?><ListBucketResult xmlns="{ns}">{items}{extra}</ListBucketResult>'
+
+
+@pytest.mark.parametrize("call,kind", [
+    (lambda: parse_listing("<not xml"), "listing"),
+    (lambda: key_time("CONUS/x/whatever.grib2.gz"), "listing"),
+    (lambda: fetch_grib(httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(404))),
+                        "CONUS/x/y.grib2.gz"), "download"),
+    (lambda: fetch_grib(httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, content=b"nope"))), "CONUS/x/y.grib2.gz"), "download"),
+    (lambda: decode_grib(b"not a grib"), "decode"),
+    (lambda: list_keys(httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500))),
+                       "CONUS/PrecipRate_00.00/20260924/"), "listing"),
+])
+def test_mrms_error_carries_failure_class(call, kind):
+    """Issue #20: each failure class is distinguishable for per-class counters."""
+    with pytest.raises(MrmsError) as info:
+        call()
+    assert info.value.kind == kind

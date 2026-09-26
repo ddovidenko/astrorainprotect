@@ -40,7 +40,7 @@ Run the same folder with different settings and note when the first
 - `MIN_DBZ` 25 vs 30: earlier alerts versus alerts for cells that never arrive.
 - `MIN_CELLS`, `ALERT_RADIUS_KM`: lead time versus false alarms.
 - `DIRECTION_FILTER=1`: how often the summary shows no ETA (motion unknown,
-  plain alerting used) and whether any cycle shows `note=moving away` for a
+  plain alerting used) and whether any cycle shows `note=reflectivity moving away` for a
   storm that did reach you. That last case is the one to watch for; if it
   happens on your data, keep the filter off.
 

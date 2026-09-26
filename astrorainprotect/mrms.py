@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import os
 import re
 import xml.etree.ElementTree as ET
 import zlib
@@ -11,11 +12,20 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-import eccodes
 import httpx
 import numpy as np
 
-from astrorainprotect.frame import Frame
+# eckit (loaded with eccodes) treats a generic DEBUG environment variable as its own switch and
+# prints a dozen "PRE-MAIN-DEBUG" lines to stdout. Hide ours while the library loads; it reads
+# the variable only at load time, so restoring it afterwards is safe.
+_debug = os.environ.pop("DEBUG", None)
+import eccodes  # noqa: E402
+
+if _debug is not None:
+    os.environ["DEBUG"] = _debug
+del _debug
+
+from astrorainprotect.frame import Frame  # noqa: E402
 
 BUCKET_URL = "https://noaa-mrms-pds.s3.amazonaws.com"
 PRODUCTS = {
@@ -28,7 +38,11 @@ _KEY_TIME = re.compile(r"_(\d{8})-(\d{6})\.grib2\.gz$")
 
 
 class MrmsError(Exception):
-    """Listing, download, or decode failure. Message says which."""
+    """Listing, download, or decode failure; `kind` names the class for per-class counters."""
+
+    def __init__(self, message: str, kind: str = "fetch") -> None:
+        super().__init__(message)
+        self.kind = kind
 
 
 def day_prefixes(product: str, now: datetime) -> list[str]:
@@ -45,18 +59,18 @@ def parse_listing(xml_text: str) -> list[str]:
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as exc:
-        raise MrmsError(f"S3 listing returned unparseable XML: {exc}") from exc
+        raise MrmsError(f"S3 listing returned unparseable XML: {exc}", kind="listing") from exc
     return [el.text for el in root.iter(f"{_S3_NS}Key") if el.text]
 
 
 def key_time(key: str) -> datetime:
     m = _KEY_TIME.search(key)
     if not m:
-        raise MrmsError(f"cannot parse timestamp from key {key!r}")
+        raise MrmsError(f"cannot parse timestamp from key {key!r}", kind="listing")
     try:
         return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S").replace(tzinfo=UTC)
     except ValueError as exc:
-        raise MrmsError(f"cannot parse timestamp from key {key!r}") from exc
+        raise MrmsError(f"cannot parse timestamp from key {key!r}", kind="listing") from exc
 
 
 def newest_key(keys: Iterable[str]) -> str | None:
@@ -87,14 +101,16 @@ def list_keys(client: httpx.Client, prefix: str) -> list[str]:
         try:
             r = client.get(f"{BUCKET_URL}/", params=params, timeout=20.0)
         except httpx.HTTPError as exc:
-            raise MrmsError(f"S3 listing failed for {prefix}: {exc}") from exc
+            raise MrmsError(f"S3 listing failed for {prefix}: {exc}", kind="listing") from exc
         if r.status_code != 200:
-            raise MrmsError(f"S3 listing returned HTTP {r.status_code} for {prefix}")
+            raise MrmsError(f"S3 listing returned HTTP {r.status_code} for {prefix}",
+                            kind="listing")
         keys += parse_listing(r.text)
         token = _continuation_token(r.text)
         if not token:
             return keys
-    raise MrmsError(f"S3 listing for {prefix} exceeded {MAX_LISTING_PAGES} pages")
+    raise MrmsError(f"S3 listing for {prefix} exceeded {MAX_LISTING_PAGES} pages",
+                    kind="listing")
 
 
 MISSING_BELOW = {"preciprate": 0.0, "reflectivity": -990.0}
@@ -114,20 +130,20 @@ def fetch_grib(client: httpx.Client, key: str) -> bytes:
     try:
         r = client.get(f"{BUCKET_URL}/{key}", timeout=60.0)
     except httpx.HTTPError as exc:
-        raise MrmsError(f"S3 download failed for {key}: {exc}") from exc
+        raise MrmsError(f"S3 download failed for {key}: {exc}", kind="download") from exc
     if r.status_code != 200:
-        raise MrmsError(f"S3 download returned HTTP {r.status_code} for {key}")
+        raise MrmsError(f"S3 download returned HTTP {r.status_code} for {key}", kind="download")
     try:
         return gzip.decompress(r.content)
     except (OSError, EOFError, zlib.error) as exc:
-        raise MrmsError(f"gunzip failed for {key}: {exc}") from exc
+        raise MrmsError(f"gunzip failed for {key}: {exc}", kind="download") from exc
 
 
 def decode_grib(data: bytes) -> tuple[GridMeta, np.ndarray]:
     try:
         gid = eccodes.codes_new_from_message(data)
     except Exception as exc:  # eccodes raises several types
-        raise MrmsError(f"GRIB decode failed: {exc}") from exc
+        raise MrmsError(f"GRIB decode failed: {exc}", kind="decode") from exc
     try:
         meta = GridMeta(
             lat0=float(eccodes.codes_get(gid, "latitudeOfFirstGridPointInDegrees")),
@@ -138,12 +154,12 @@ def decode_grib(data: bytes) -> tuple[GridMeta, np.ndarray]:
             nj=int(eccodes.codes_get(gid, "Nj")),
         )
         if int(eccodes.codes_get(gid, "scanningMode")) != 0:
-            raise MrmsError("GRIB decode failed: unexpected scanningMode")
+            raise MrmsError("GRIB decode failed: unexpected scanningMode", kind="decode")
         values = eccodes.codes_get_values(gid).reshape(meta.nj, meta.ni)
     except MrmsError:
         raise
     except Exception as exc:
-        raise MrmsError(f"GRIB decode failed: {exc}") from exc
+        raise MrmsError(f"GRIB decode failed: {exc}", kind="decode") from exc
     finally:
         eccodes.codes_release(gid)
     return meta, values

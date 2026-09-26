@@ -58,7 +58,7 @@ class State:
         """Hosts that were online at the last poll, or None if never recorded."""
         try:
             text = self._scopes.read_text()
-        except FileNotFoundError:
+        except OSError:          # missing, unreadable, or wrong owner: treat as unknown
             return None
         return {h for h in text.split(",") if h}
 

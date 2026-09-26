@@ -508,7 +508,7 @@ def test_scope_going_offline_notifies_default_priority(tmp_path):
     app.scope_check = lambda: ["10.0.0.5"]
     run_cycle(app)
     assert app.notifier.sent == [
-        ("Scope offline", "10.0.0.6 went offline. Still online: 10.0.0.5.")
+        ("Scope offline", "10.0.0.6 went offline. Online: 10.0.0.5. Radar checks active.")
     ]
     assert app.notifier.priorities[-1] == "default"
     assert app.state.last_scopes() == {"10.0.0.5"}
@@ -529,7 +529,9 @@ def test_scope_coming_online_notifies(tmp_path):
     run_cycle(app)
     app.scope_check = lambda: ["10.0.0.6"]
     run_cycle(app)
-    assert app.notifier.sent == [("Scope online", "10.0.0.6 came online. Radar checks active.")]
+    assert app.notifier.sent == [
+        ("Scope online", "10.0.0.6 came online. Online: 10.0.0.6. Radar checks active.")
+    ]
 
 
 def test_both_directions_in_one_cycle(tmp_path):
@@ -538,7 +540,7 @@ def test_both_directions_in_one_cycle(tmp_path):
     app.scope_check = lambda: ["10.0.0.6"]
     run_cycle(app)
     assert app.notifier.sent == [("Scopes changed", "10.0.0.6 came online; 10.0.0.5 went offline. "
-                                                    "Still online: 10.0.0.6.")]
+                                                    "Online: 10.0.0.6. Radar checks active.")]
 
 
 def test_unchanged_scopes_stay_silent_and_no_gate_means_no_announcements(tmp_path):
@@ -551,12 +553,50 @@ def test_unchanged_scopes_stay_silent_and_no_gate_means_no_announcements(tmp_pat
     assert plain.notifier.sent == [] and plain.state.last_scopes() is None
 
 
-def test_scope_change_survives_restart_without_reannouncing(tmp_path):
+def test_scope_set_is_persisted_and_compared_across_restart(tmp_path):
     app = scoped(tmp_path, lambda: ["10.0.0.5"])
     run_cycle(app)
-    fresh = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5,10.0.0.6"}, scope=lambda: ["10.0.0.5"])
-    run_cycle(fresh)                                   # same state dir, same scopes
-    assert fresh.notifier.sent == []
+    assert (tmp_path / "state" / "scopes_online").read_text() == "10.0.0.5"
+    same = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5,10.0.0.6"}, scope=lambda: ["10.0.0.5"])
+    run_cycle(same)                                    # same state dir, same scopes: silent
+    assert same.notifier.sent == []
+    changed = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5,10.0.0.6"}, scope=lambda: [])
+    run_cycle(changed)                                 # changed while we were down: announced
+    assert [t for t, _ in changed.notifier.sent] == ["Scope offline"]
+
+
+def test_failed_announcement_is_retried_next_poll(tmp_path):
+    app = scoped(tmp_path, lambda: ["10.0.0.5"])
+    run_cycle(app)
+    app.scope_check = lambda: []
+    app.notifier.ok = False
+    run_cycle(app)
+    assert app.state.last_scopes() == {"10.0.0.5"}     # not recorded: the change is still pending
+    assert app.failures["ntfy"] == 1
+    app.notifier.ok = True
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Scope offline", "Scope offline"]
+    assert app.state.last_scopes() == set()
+
+
+def test_state_write_failure_never_blocks_radar(tmp_path, caplog):
+    caplog.set_level(logging.ERROR)
+    app = scoped(tmp_path, lambda: ["10.0.0.5"])
+
+    def boom(hosts):
+        raise OSError(28, "No space left on device")
+
+    app.state.set_scopes = boom
+    line = run_cycle(app)
+    assert "outcome=" in line                          # the cycle completed
+    assert any("scope announcement failed" in r.getMessage() for r in caplog.records)
+    assert app.state.heartbeat_age_sec(NOW.timestamp()) == 0.0
+
+
+def test_startup_failure_survives_unparseable_url(tmp_path, capsys):
+    from astrorainprotect.app import notify_startup_failure
+    assert notify_startup_failure({"NTFY_URL": "https://[::1"}, "bad", tmp_path) is False
+    assert "could not send" in capsys.readouterr().err
 
 
 # --- issue #26: fatal startup errors notify --------------------------------------------------

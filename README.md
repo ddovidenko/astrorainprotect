@@ -104,7 +104,7 @@ script):
   silences a radar trigger.
 - **Scope announcements**: with `SCOPE_HOSTS` set, any host coming online or
   going offline between polls sends a `default`-priority notification ("Scope
-  online: 192.168.1.235 came online. Radar checks active." / "Scope offline: ...
+  online: 192.168.1.235 came online. Online: 192.168.1.235. Radar checks active." / "Scope offline: ...
   No scope online; radar checks paused until one returns."), so you know the
   monitor saw the scope you just set up. The last known set is kept in the
   state directory, so a container restart does not re-announce.

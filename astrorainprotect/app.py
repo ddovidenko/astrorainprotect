@@ -137,12 +137,14 @@ def _scope_status(cfg: Config, online: list[str] | None) -> str:
 
 def _announce_scope_changes(app: App, online: list[str]) -> None:
     """Issue #22: one notification per poll when any scope host comes or goes.
-    The last known set lives in the state dir, so a restart does not re-announce."""
+    The last known set lives in the state dir, so a restart does not re-announce. The set is
+    recorded only after a successful send, so a failed announcement is retried next poll."""
     now_online = set(online)
     before = app.state.last_scopes()
-    if before is None or before == now_online:
-        if before is None:
-            app.state.set_scopes(now_online)
+    if before is None:
+        app.state.set_scopes(now_online)
+        return
+    if before == now_online:
         return
     came = sorted(now_online - before)
     went = sorted(before - now_online)
@@ -152,14 +154,17 @@ def _announce_scope_changes(app: App, online: list[str]) -> None:
     if went:
         parts.append(f"{', '.join(went)} went offline")
     if now_online:
-        still = ", ".join(sorted(now_online))
-        tail = "Radar checks active." if not went else f"Still online: {still}."
+        tail = f"Online: {', '.join(sorted(now_online))}. Radar checks active."
     else:
         tail = "No scope online; radar checks paused until one returns."
     title = "Scopes changed" if came and went else ("Scope online" if came else "Scope offline")
     if app.notifier.send(title, f"{'; '.join(parts)}. {tail}", priority="default"):
         log.info("scope change announced: %s", "; ".join(parts))
-    app.state.set_scopes(now_online)
+        app.state.set_scopes(now_online)
+    else:
+        app.failures["ntfy"] += 1
+        log.error("ntfy: scope announcement failed (consecutive failures: %d); will retry",
+                  app.failures["ntfy"])
 
 
 STARTUP_FAILURE_MARKER = "astrorainprotect_startup_failure_sent"
@@ -176,8 +181,12 @@ def notify_startup_failure(env: Mapping[str, str], reason: str, tmp_dir: Path | 
         return False
     token = (env.get("NTFY_TOKEN") or "").strip()
     notifier = Notifier(client or httpx.Client(), url, token, "high")
-    sent = notifier.send("astrorainprotect failed to start", f"{reason} The container will keep "
-                         "restarting until this is fixed; no rain alerts until then.")
+    try:
+        sent = notifier.send("astrorainprotect failed to start", f"{reason} The container will "
+                             "keep restarting until this is fixed; no rain alerts until then.")
+    except Exception as exc:  # e.g. an unparseable NTFY_URL is itself a config error
+        print(f"could not send the startup-failure notification: {exc}", file=sys.stderr)
+        return False
     if sent:
         try:
             marker.parent.mkdir(parents=True, exist_ok=True)
@@ -209,7 +218,10 @@ def run_cycle(app: App) -> str:
     online = app.scope_check() if cfg.scope_hosts else None
     _maybe_send_test(app, _scope_status(cfg, online))
     if online is not None:
-        _announce_scope_changes(app, online)
+        try:
+            _announce_scope_changes(app, online)
+        except Exception:   # informational only; must never block the radar path
+            log.exception("scope announcement failed")
 
     if online is not None:
         if not online:

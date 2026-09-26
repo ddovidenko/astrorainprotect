@@ -123,8 +123,9 @@ the final review, 2026-09-23). In the shell script, "already raining" empties
 over the house, so it is not carried over:
 
 - Raining at the house (PrecipRate within `NOW_RADIUS_KM` ≥ `RAINING_NOW`) is a
-  radar trigger with ETA 0 (message headline "Rain at the house now (...)"). It
-  sends, skips or repeats like any other trigger. `REARM` happens only when no
+  trigger with source `house` and ETA 0; the notification is titled "Currently
+  raining" with body "Currently raining at the house (<rate> mm/h)" followed by
+  any other active source. It sends, skips or repeats like any other trigger. `REARM` happens only when no
   trigger remains. Pirate Weather's "raining now" produces no trigger and never
   suppresses one.
 - Any active trigger and no latch → `SEND`.
@@ -174,7 +175,9 @@ Every `POLL_SEC` seconds:
 9. Touch the heartbeat file.
 
 DEBUG=2 sends one test notification per container start through the same
-`notify` code path, marker in `/tmp` (cleared on start).
+`notify` code path, marker in `/tmp` (cleared on start). It is sent before the
+scope gate acts, and its body states the gate's result (scopes online, waiting
+for a scope, or gate disabled), so a restart always announces itself.
 
 ## 6. Notifications
 

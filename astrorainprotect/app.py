@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from astrorainprotect.alarm import Action, AlarmInputs, Trigger, decide
+from astrorainprotect.alarm import HOUSE, Action, AlarmInputs, Trigger, decide
 from astrorainprotect.config import Config, ConfigError, describe, load_config
 from astrorainprotect.detect import Detection, detect
 from astrorainprotect.frame import Frame
@@ -123,9 +123,18 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
     return Trigger(source="radar", eta_min=eta, detail=detail)
 
 
-def _maybe_send_test(app: App) -> None:
+def _scope_status(cfg: Config, online: list[str] | None) -> str:
+    """Human text for the test notification: what the scope gate will do this cycle."""
+    if online is None:
+        return "Scope gate disabled; checking every poll."
+    if online:
+        return f"Scopes online: {' '.join(online)}"
+    return f"No scope online ({cfg.scope_hosts}); waiting for one before checking radar."
+
+
+def _maybe_send_test(app: App, scope_status: str) -> None:
     if app.cfg.debug >= 2 and not app.state.test_sent():
-        if app.notifier.send(TITLE_TEST, "Test from astrorainprotect; ntfy path works."):
+        if app.notifier.send(TITLE_TEST, f"Test from astrorainprotect. {scope_status}"):
             app.state.mark_test_sent()
             log.info("TEST notification sent")
         else:
@@ -140,8 +149,12 @@ def run_cycle(app: App) -> str:
     ts = now.timestamp()
     app.last_note = ""
 
-    if cfg.scope_hosts:
-        online = app.scope_check()
+    # The DEBUG=2 test send runs before the scope gate so a restart always announces itself,
+    # and says whether it is checking radar or waiting for a scope.
+    online = app.scope_check() if cfg.scope_hosts else None
+    _maybe_send_test(app, _scope_status(cfg, online))
+
+    if online is not None:
         if not online:
             app.state.clear_latch()
             line = f"no scope online ({cfg.scope_hosts}), not checking"
@@ -150,8 +163,6 @@ def run_cycle(app: App) -> str:
             return line
         if cfg.debug >= 1:
             log.info("DEBUG scope(s) online: %s", " ".join(online))
-
-    _maybe_send_test(app)
 
     dets: list[Detection] = []
     statuses: dict[str, RadarStatus] = {}
@@ -184,15 +195,18 @@ def run_cycle(app: App) -> str:
         log.warning("radar unavailable (%s); latch untouched", reasons)
 
     triggers: list[Trigger] = []
-    rt = radar_trigger(app, dets, now)
-    if rt:
-        triggers.append(rt)
     wet = next((d for d in dets if d.product == "preciprate" and d.raining_now), None)
     raining_now = wet is not None
+    # When it is raining at the house the "house" trigger describes PrecipRate; the PrecipRate
+    # "nearby" detection would only repeat the same cell, so only reflectivity feeds the radar
+    # trigger in that case.
+    radar_dets = [d for d in dets if not (raining_now and d.product == "preciprate")]
+    rt = radar_trigger(app, radar_dets, now)
+    if rt:
+        triggers.append(rt)
     if wet is not None:
         # Rain forming in place over the house must alert (differs from the legacy re-arm).
-        triggers.append(Trigger(source="radar", eta_min=0.0,
-                                detail=f"raining at the house now ({wet.rate_at_house:.1f} mm/h)"))
+        triggers.append(Trigger(source=HOUSE, eta_min=0.0, detail=f"{wet.rate_at_house:.1f} mm/h"))
 
     if app.pirate is not None:
         try:

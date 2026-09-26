@@ -78,9 +78,11 @@ script):
   the latch has been active for at least that many minutes; with the default
   `REPEAT_MIN=0`, there is no repeat, ever.
 - **Rain at the house**: if PrecipRate within `NOW_RADIUS_KM` reaches
-  `RAINING_NOW` (`raining_now=1`), that is itself a radar trigger with an ETA of
-  0. Unlatched, it sends "Rain at the house now (...)"; latched, it is skipped
-  like any other trigger (or repeated under `REPEAT_MIN`). This is a deliberate
+  `RAINING_NOW` (`raining_now=1`), that is itself a trigger (source `house`,
+  ETA 0). Unlatched, it sends a notification titled "Currently raining" with the
+  body "Currently raining at the house (0.8 mm/h)", followed by any other active
+  source; latched, it is skipped like any other trigger (or repeated under
+  `REPEAT_MIN` as "Currently raining (still)"). This is a deliberate
   departure from the legacy script, which treated rain at the house as "nothing
   left to warn about" and silently re-armed: a cell that pops up directly over
   the house — in-place convection, the case this project exists for — would
@@ -96,7 +98,10 @@ script):
 - **DEBUG levels**: `DEBUG=0` is silent apart from normal INFO logging.
   `DEBUG=1` adds extra detail lines (which scope hosts are online, the Pirate
   Weather summary). `DEBUG=2` additionally sends a one-time test notification
-  on startup, so you can confirm the ntfy path works without waiting for rain.
+  on every container start, so you can confirm the ntfy path works without
+  waiting for rain. The test is sent before the scope gate and says what the
+  gate will do: "Scopes online: ...", "No scope online (...); waiting for one
+  before checking radar." or "Scope gate disabled; checking every poll."
 - **Direction filter**: with `DIRECTION_FILTER=1`, storm motion is estimated
   from the last few reflectivity frames and the nearest qualifying echo is
   projected along it. If its projected path does not come within

@@ -201,13 +201,14 @@ def test_one_product_error_keeps_other_trigger(tmp_path, caplog):
     from astrorainprotect.mrms import MrmsError
     caplog.set_level(logging.ERROR)
     radar = FakeRadar(empty("preciprate"), storm("reflectivity", 40.0),
-                      error=MrmsError("preciprate GET failed"), error_for="preciprate")
+                      error=MrmsError("preciprate GET failed", kind="download"),
+                      error_for="preciprate")
     app = build(tmp_path, radar=radar)
     run_cycle(app)
     assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]
     errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
     assert any("preciprate GET failed" in m and "consecutive failures: 1" in m for m in errors)
-    assert app.failures["radar"] == 1
+    assert app.failures["radar.download"] == 1
 
 
 def test_scope_offline_skips_and_clears_latch(tmp_path, caplog):
@@ -436,3 +437,51 @@ def test_main_exits_when_state_dir_not_writable(monkeypatch, capsys, tmp_path):
         ro.chmod(0o700)
     err = capsys.readouterr().err
     assert "STATE_DIR" in err and str(ro) in err and "1000" in err
+
+
+def test_radar_failure_counters_are_per_class(tmp_path, caplog):
+    """Issue #20: listing, download and decode failures count separately."""
+    from astrorainprotect.mrms import MrmsError
+    caplog.set_level(logging.ERROR)
+    app = build(tmp_path, radar=FakeRadar(error=MrmsError("S3 listing failed", kind="listing")))
+    run_cycle(app)
+    run_cycle(app)
+    assert app.failures["radar.listing"] == 4          # two products x two cycles
+    assert app.failures.get("radar.download", 0) == 0
+    app.radar = FakeRadar(error=MrmsError("GRIB decode failed", kind="decode"))
+    run_cycle(app)
+    assert app.failures["radar.listing"] == 0           # class with no error this cycle resets
+    assert app.failures["radar.decode"] == 2
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any(m.startswith("radar decode") and "consecutive failures: 2" in m for m in msgs)
+
+
+def test_scope_offline_summary_line_has_full_field_set(tmp_path):
+    """Issue #20: the scope-offline path logs the same field set as every other poll."""
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: [])
+    line = run_cycle(app)
+    for field in ("frame=none", "age=n/a", "radar=skipped", "raining_now=0", "eta=none",
+                  "sources=none", "latched=0", "outcome=scope-offline", "note=no scope online"):
+        assert field in line, field
+
+
+def test_direction_filter_note_names_reflectivity(tmp_path):
+    """Issue #19: the note says what moved away, so it reads right next to outcome=send."""
+    radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)],
+                         preciprate=raining("preciprate", 1.0))
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    line = run_cycle(app)
+    assert "note=reflectivity moving away" in line and "outcome=send" in line
+
+
+def test_module_entry_hides_debug_from_eckit(tmp_path):
+    """Issue #13: DEBUG=1/2 must not switch on eckit's PRE-MAIN-DEBUG chatter (it reads DEBUG)."""
+    import subprocess
+    import sys as _sys
+    env = {**BASE, "DEBUG": "2", "REPLAY_DIR": str(tmp_path), "STATE_DIR": str(tmp_path / "s"),
+           "PATH": "/usr/bin:/bin"}
+    out = subprocess.run([_sys.executable, "-m", "astrorainprotect"], env=env, capture_output=True,
+                         text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    assert "PRE-MAIN" not in out.stdout + out.stderr
+    assert "DEBUG=2" in out.stdout                      # the app still saw its own DEBUG

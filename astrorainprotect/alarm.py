@@ -55,6 +55,8 @@ def compose_message(triggers: tuple[Trigger, ...]) -> str:
         head = f"Currently raining at the house ({house.detail})"
         return f"{head}; {sources}" if sources else head
     etas = [t.eta_min for t in others if t.eta_min is not None]
+    if etas and min(etas) < 0.5:
+        return f"Rain arriving now ({sources})"
     if etas:
         return f"Rain expected in about {round(min(etas))} min ({sources})"
     return f"Rain nearby: {sources}"

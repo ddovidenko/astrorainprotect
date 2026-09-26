@@ -121,7 +121,7 @@ script):
   projected along it. If its projected path does not come within
   `max(NOW_RADIUS_KM, ALERT_RADIUS_KM / 4)` of the site inside `LOOKAHEAD_MIN`,
   the radar trigger is dropped for that cycle (the summary line shows
-  `note=moving away`). When it will hit, the alert carries an ETA, counted
+  `note=reflectivity moving away`). When it will hit, the alert carries an ETA, counted
   down by the age of the newest frame. When motion is unknown (too few
   frames, low confidence, sub-resolution shift), the filter never suppresses:
   plain radius alerting applies. Rain at the site always alerts.
@@ -149,13 +149,15 @@ Each poll cycle ends with one summary line, for example:
   trigger carries an ETA. Pirate Weather triggers carry one; radar triggers
   carry one when `DIRECTION_FILTER=1` and motion is known, and rain at the
   house counts as `0min`.
-- `sources` — which trigger(s) fired this cycle (`radar`, `pirate weather`, both,
-  or `none`).
+- `sources` — which trigger(s) fired this cycle: `radar`, `house` (raining at
+  the site), `pirate weather`, any combination, or `none`.
 - `latched` — 1 if the alarm is currently latched (an alert is active), else 0.
 - `outcome` — what the cycle actually did: `send`, `repeat`, `skip`, `re-armed`,
-  `none`, or `send-failed`.
-- `note` — `-` normally, or `moving away` when the direction filter dropped a
-  radar echo this cycle.
+  `none`, `send-failed`, or `scope-offline` (no scope answered, so nothing was
+  checked; the line then shows `radar=skipped`).
+- `note` — `-` normally, `reflectivity moving away` when the direction filter
+  dropped the radar echo this cycle, or `no scope online (...)` on the
+  scope-offline path.
 
 ## Tuning
 
@@ -185,6 +187,9 @@ in [docs/tuning.md](docs/tuning.md).
   this project can fix. `Priority` and emoji tags do not control sound.
 - Docker creates a *directory* if a bind-mounted path is missing on the host,
   owned by root. Create the state directory yourself and give it to uid 1000.
+  The container checks this at startup and exits (code 3) if it cannot write
+  there, so a wrong mount shows up as a restart loop in `docker ps` rather than
+  as alerts that repeat every poll.
 - Pirate Weather free tier has a monthly call cap; polling every 5 minutes fits.
   Do not poll it faster.
 - Radar frame times in the log are UTC (`frame=20:12:39Z`); everything else is

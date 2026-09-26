@@ -105,3 +105,11 @@ def test_decision_is_frozen():
     d = Decision(Action.NONE)
     with pytest.raises(AttributeError):
         d.title = "x"  # type: ignore[misc]
+
+
+def test_eta_under_half_minute_reads_arriving_now():
+    """Issue #19: a projected ETA that rounds to 0 must not read 'about 0 min'."""
+    t = Trigger(source="radar", eta_min=0.2, detail="reflectivity 41 dBZ, 3.0 km to the W")
+    d = decide(inputs([t]))
+    assert d.title == "Rain incoming"
+    assert d.message == "Rain arriving now (radar: reflectivity 41 dBZ, 3.0 km to the W)"

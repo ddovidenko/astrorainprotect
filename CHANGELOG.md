@@ -10,3 +10,6 @@ Keep a Changelog; versions follow SemVer.
   legacy alert semantics: one alert per event, optional repeat, scope-online gate,
   DEBUG levels, test notification.
 - Pirate Weather kept as a secondary trigger (PW_KEY), polled at most every 5 minutes.
+- Docker image (python:3.12-slim, non-root, heartbeat HEALTHCHECK), measured size: 506 MB.
+- GitHub Actions CI: ruff + pytest on PRs, image push to ghcr.io/ddovidenko/astrorainprotect on main.
+- Portainer Git stack file.

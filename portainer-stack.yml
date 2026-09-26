@@ -1,0 +1,32 @@
+# Portainer: Stacks > Add stack > Repository, pointing at this repo, compose path portainer-stack.yml.
+# Set the variables in the stack's Environment variables section. Only LAT, LON, NTFY_URL are required.
+# The host directory /opt/astrorainprotect/state must be writable by uid 1000.
+# Not exposed on purpose: STATE_DIR is fixed to /state by the image and the volume below; REPLAY_DIR is a local tuning mode that exits after one pass and does not belong in a production stack.
+services:
+  astrorainprotect:
+    image: ghcr.io/ddovidenko/astrorainprotect:latest
+    container_name: astrorainprotect
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-America/Chicago}
+      - LAT=${LAT}
+      - LON=${LON}
+      - NTFY_URL=${NTFY_URL}
+      - NTFY_TOKEN=${NTFY_TOKEN:-}
+      - NTFY_PRIORITY=${NTFY_PRIORITY:-high}
+      - DEBUG=${DEBUG:-0}
+      - POLL_SEC=${POLL_SEC:-180}
+      - ALERT_RADIUS_KM=${ALERT_RADIUS_KM:-20}
+      - NOW_RADIUS_KM=${NOW_RADIUS_KM:-1}
+      - MIN_INTENSITY=${MIN_INTENSITY:-0.2}
+      - MIN_DBZ=${MIN_DBZ:-30}
+      - MIN_CELLS=${MIN_CELLS:-3}
+      - RAINING_NOW=${RAINING_NOW:-0.05}
+      - DIRECTION_FILTER=${DIRECTION_FILTER:-0}
+      - LOOKAHEAD_MIN=${LOOKAHEAD_MIN:-60}
+      - REPEAT_MIN=${REPEAT_MIN:-0}
+      - SCOPE_HOSTS=${SCOPE_HOSTS:-}
+      - PW_KEY=${PW_KEY:-}
+      - MIN_PROB=${MIN_PROB:-0.3}
+    volumes:
+      - /opt/astrorainprotect/state:/state

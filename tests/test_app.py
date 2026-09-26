@@ -1,0 +1,417 @@
+import logging
+import re
+from datetime import UTC, datetime, timedelta
+
+import numpy as np
+
+from astrorainprotect.app import RADAR_MAX_AGE, App, radar_status, run_cycle
+from astrorainprotect.config import load_config
+from astrorainprotect.pirate import PirateError, PirateResult
+from astrorainprotect.state import State
+from tests.conftest import make_frame
+
+NOW = datetime(2026, 9, 23, 20, 0, tzinfo=UTC)
+BASE = {"LAT": "29.97", "LON": "-95.67", "NTFY_URL": "https://ntfy.example.net/rain"}
+
+
+class FakeRadar:
+    def __init__(self, preciprate=None, reflectivity=None, error=None, error_for=None):
+        self.by_product = {"preciprate": preciprate, "reflectivity": reflectivity}
+        self.error = error
+        self.error_for = error_for            # raise only for this product, when set
+        self.calls = 0
+
+    def fetch_latest(self, product, now):
+        self.calls += 1
+        if self.error and (self.error_for is None or self.error_for == product):
+            raise self.error
+        return self.by_product[product]
+
+    def frames(self, product):
+        f = self.by_product[product]
+        return [f] if f else []
+
+
+class FakeNotifier:
+    def __init__(self, ok=True):
+        self.ok, self.sent = ok, []
+
+    def send(self, title, message):
+        self.sent.append((title, message))
+        return self.ok
+
+
+def empty(product):
+    return make_frame(np.zeros((101, 101)), product=product, valid_time=NOW - timedelta(minutes=2))
+
+
+def storm(product, value):
+    g = np.zeros((101, 101), dtype=np.float32)
+    g[60:64, 40:44] = value                      # ~11 km SW
+    return make_frame(g, product=product, valid_time=NOW - timedelta(minutes=2))
+
+
+def raining(product, value):
+    g = np.zeros((101, 101), dtype=np.float32)
+    g[49:52, 49:52] = value
+    return make_frame(g, product=product, valid_time=NOW - timedelta(minutes=2))
+
+
+def build(tmp_path, env=None, radar=None, notifier=None, scope=None, now=NOW):
+    cfg = load_config({**BASE, "STATE_DIR": str(tmp_path / "state"), **(env or {})})
+    return App(cfg=cfg, radar=radar or FakeRadar(empty("preciprate"), empty("reflectivity")),
+               notifier=notifier or FakeNotifier(), state=State(cfg.state_dir, tmp_path / "tmp"),
+               scope_check=scope or (lambda: []), pirate=None, clock=lambda: now)
+
+
+def test_radar_status():
+    assert radar_status(None, NOW).available is False
+    assert radar_status(empty("preciprate"), NOW).available is True
+    old = make_frame(np.zeros((3, 3)), valid_time=NOW - RADAR_MAX_AGE - timedelta(seconds=1))
+    old_status = radar_status(old, NOW)
+    assert old_status.available is False and "stale" in old_status.reason
+    gappy = make_frame(np.zeros((3, 3)), valid_time=NOW, missing_fraction=0.6)
+    gappy_status = radar_status(gappy, NOW)
+    assert gappy_status.available is False and "missing" in gappy_status.reason
+
+
+def test_quiet_cycle_logs_summary(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    app = build(tmp_path)
+    line = run_cycle(app)
+    assert "frame=" in line and "age=" in line and "latched=0" in line
+    assert app.notifier.sent == []
+    assert app.state.heartbeat_age_sec(NOW.timestamp()) == 0.0
+
+
+def test_reflectivity_storm_sends_alert(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    title, msg = app.notifier.sent[0]
+    assert title == "Rain incoming"
+    assert "SW" in msg and "reflectivity" in msg
+    assert app.state.latched()
+
+
+def test_preciprate_storm_sends_alert(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(storm("preciprate", 1.0), empty("reflectivity")))
+    run_cycle(app)
+    assert app.notifier.sent[0][0] == "Rain incoming"
+    assert "preciprate" in app.notifier.sent[0][1]
+
+
+def test_second_cycle_skips(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1
+
+
+def test_repeat(tmp_path):
+    app = build(tmp_path, env={"REPEAT_MIN": "10"},
+                radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    app.clock = lambda: NOW + timedelta(minutes=11)
+    old_values = app.radar.by_product["reflectivity"].values
+    app.radar.by_product["reflectivity"] = make_frame(
+        old_values, product="reflectivity", valid_time=NOW + timedelta(minutes=9)
+    )
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming", "Rain incoming (still)"]
+
+
+def test_send_failure_does_not_latch(tmp_path, caplog):
+    caplog.set_level(logging.ERROR)
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)),
+                notifier=FakeNotifier(ok=False))
+    run_cycle(app)
+    assert not app.state.latched()
+    run_cycle(app)
+    assert len(app.notifier.sent) == 2                # retried next poll
+    assert any("consecutive failures: 2" in r.getMessage() for r in caplog.records)
+
+
+def test_rain_at_house_alerts_when_unlatched(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(raining("preciprate", 1.0), empty("reflectivity")))
+    line = run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    title, msg = app.notifier.sent[0]
+    assert title == "Currently raining"
+    assert msg.startswith("Currently raining at the house (1.0 mm/h)")
+    assert "preciprate" not in msg                     # the house cell is not listed twice
+    assert app.state.latched()
+    assert "raining_now=1" in line and "sources=house" in line
+
+
+def test_rain_at_house_while_latched_skips(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert app.state.latched()
+    app.radar.by_product["preciprate"] = raining("preciprate", 1.0)
+    line = run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    assert app.state.latched()
+    assert "outcome=skip" in line
+
+
+def test_rearms_after_everything_clears(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(raining("preciprate", 1.0), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert app.state.latched()
+    app.radar.by_product["preciprate"] = empty("preciprate")
+    app.radar.by_product["reflectivity"] = empty("reflectivity")
+    line = run_cycle(app)
+    assert not app.state.latched()
+    assert "outcome=re-armed" in line
+
+
+def test_radar_unavailable_leaves_latch(tmp_path, caplog):
+    caplog.set_level(logging.WARNING)
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert app.state.latched()
+    app.radar = FakeRadar(None, None)
+    run_cycle(app)
+    assert app.state.latched()
+    assert any("radar unavailable" in r.getMessage() for r in caplog.records)
+
+
+def test_radar_partial_outage_leaves_latch(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert app.state.latched()
+    app.radar = FakeRadar(empty("preciprate"), None)
+    run_cycle(app)
+    assert app.state.latched()
+    assert len(app.notifier.sent) == 1                # nothing new was sent
+
+
+def test_radar_error_is_logged_and_loop_continues(tmp_path, caplog):
+    from astrorainprotect.mrms import MrmsError
+    caplog.set_level(logging.ERROR)
+    app = build(tmp_path, radar=FakeRadar(error=MrmsError("S3 listing failed")))
+    line = run_cycle(app)
+    assert any("S3 listing failed" in r.getMessage() for r in caplog.records)
+    assert "radar=unavailable" in line
+
+
+def test_one_product_error_keeps_other_trigger(tmp_path, caplog):
+    from astrorainprotect.mrms import MrmsError
+    caplog.set_level(logging.ERROR)
+    radar = FakeRadar(empty("preciprate"), storm("reflectivity", 40.0),
+                      error=MrmsError("preciprate GET failed"), error_for="preciprate")
+    app = build(tmp_path, radar=radar)
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert any("preciprate GET failed" in m and "consecutive failures: 1" in m for m in errors)
+    assert app.failures["radar"] == 1
+
+
+def test_scope_offline_skips_and_clears_latch(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    radar = FakeRadar(empty("preciprate"), storm("reflectivity", 40.0))
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, radar=radar, scope=lambda: [])
+    app.state.set_latch(NOW.timestamp())
+    line = run_cycle(app)
+    assert radar.calls == 0
+    assert not app.state.latched()
+    assert "no scope online" in line
+    assert app.notifier.sent == []
+    assert app.state.heartbeat_age_sec(NOW.timestamp()) == 0.0
+
+
+def test_scope_online_runs_checks(tmp_path):
+    radar = FakeRadar(empty("preciprate"), storm("reflectivity", 40.0))
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, radar=radar, scope=lambda: ["10.0.0.5"])
+    run_cycle(app)
+    assert radar.calls == 2 and len(app.notifier.sent) == 1
+
+
+def test_debug2_sends_one_test_notification(tmp_path):
+    app = build(tmp_path, env={"DEBUG": "2"})
+    run_cycle(app)
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain alert test"]
+
+
+def test_debug2_test_send_runs_even_when_scope_offline(tmp_path):
+    radar = FakeRadar(empty("preciprate"), storm("reflectivity", 40.0))
+    app = build(tmp_path, env={"DEBUG": "2", "SCOPE_HOSTS": "10.0.0.5,10.0.0.6"}, radar=radar,
+                scope=lambda: [])
+    app.state.set_latch(NOW.timestamp())
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain alert test"]
+    assert "No scope online (10.0.0.5,10.0.0.6); waiting" in app.notifier.sent[0][1]
+    assert radar.calls == 0                            # the gate still skipped the checks
+    assert not app.state.latched()                     # and still reset the latch
+
+
+def test_debug2_test_message_names_online_scopes(tmp_path):
+    app = build(tmp_path, env={"DEBUG": "2", "SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: ["10.0.0.5"])
+    run_cycle(app)
+    assert "Scopes online: 10.0.0.5" in app.notifier.sent[0][1]
+
+
+def test_debug2_test_message_without_scope_gate(tmp_path):
+    app = build(tmp_path, env={"DEBUG": "2"})
+    run_cycle(app)
+    assert "Scope gate disabled" in app.notifier.sent[0][1]
+
+
+def test_debug2_test_marker_cleared_by_main_start(tmp_path):
+    app = build(tmp_path, env={"DEBUG": "2"})
+    app.state.mark_test_sent()
+    app.state.clear_test_marker()
+    run_cycle(app)
+    assert app.notifier.sent[0][0] == "Rain alert test"
+
+
+def test_main_missing_env_exits_nonzero(monkeypatch, capsys):
+    from astrorainprotect.app import main
+    monkeypatch.setattr("os.environ", {})
+    assert main([]) == 2
+    assert "LAT is required" in capsys.readouterr().err
+
+
+class FakePirate:
+    def __init__(self, result=None, error=None):
+        self.result, self.error, self.calls = result, error, 0
+
+    def check(self, now):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.result
+
+
+def pw(eta, raining_now=False):
+    return PirateResult(raining_now, 0.0, 70, 1.2, eta, 60, "prob 70%", 60)
+
+
+def test_pirate_trigger_alone_sends(tmp_path):
+    app = build(tmp_path)
+    app.pirate = FakePirate(pw(15))
+    run_cycle(app)
+    assert app.notifier.sent[0][1].startswith("Rain expected in about 15 min")
+    assert "pirate weather" in app.notifier.sent[0][1]
+
+
+def test_pirate_error_logged_radar_still_alerts(tmp_path, caplog):
+    caplog.set_level(logging.ERROR)
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    app.pirate = FakePirate(error=PirateError("HTTP 429"))
+    run_cycle(app)
+    assert any("HTTP 429" in r.getMessage() for r in caplog.records)
+    assert len(app.notifier.sent) == 1
+
+
+def test_pirate_raining_now_does_not_silence_radar(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert app.state.latched()
+    app.pirate = FakePirate(pw(None, raining_now=True))
+    line = run_cycle(app)
+    assert app.state.latched()                        # PW "raining" changed nothing
+    assert len(app.notifier.sent) == 1
+    assert "outcome=skip" in line
+
+
+def test_pirate_raining_now_does_not_veto_first_alert(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    app.pirate = FakePirate(pw(None, raining_now=True))
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]
+
+
+def test_build_app_creates_pirate_only_with_key(tmp_path):
+    from astrorainprotect.app import build_app
+    from astrorainprotect.pirate import PirateSource
+    cfg = load_config({**BASE, "STATE_DIR": str(tmp_path)})
+    assert build_app(cfg).pirate is None
+    cfg = load_config({**BASE, "STATE_DIR": str(tmp_path), "PW_KEY": "k"})
+    assert isinstance(build_app(cfg).pirate, PirateSource)
+
+
+def moving_storm(k, toward=True, age_min=0.0):
+    """Reflectivity blob ~11 km SW that steps 3 cells per frame toward (or away from) the house.
+
+    age_min shifts every frame back in time so the newest (k=2) is that many minutes old.
+    """
+    g = np.zeros((101, 101), dtype=np.float32)
+    off = -k if toward else k                      # one cell per 2-minute frame
+    g[62 + off:66 + off, 38 - off:42 - off] = 40.0  # starts ~14 km SW; stays inside 20 km
+    return make_frame(g, product="reflectivity",
+                      valid_time=NOW - timedelta(minutes=2 * (2 - k) + age_min))
+
+
+class HistoryRadar(FakeRadar):
+    def __init__(self, frames, preciprate=None):
+        super().__init__(preciprate if preciprate is not None else empty("preciprate"), frames[-1])
+        self._hist = frames
+
+    def frames(self, product):
+        return self._hist if product == "reflectivity" else [self.by_product["preciprate"]]
+
+
+def test_direction_filter_suppresses_receding_storm(tmp_path):
+    radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)])
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    line = run_cycle(app)
+    assert app.notifier.sent == []
+    assert "moving away" in line
+
+
+def test_direction_filter_alerts_with_eta_for_approaching_storm(tmp_path):
+    radar = HistoryRadar([moving_storm(k, toward=True) for k in range(3)])
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    assert app.notifier.sent[0][1].startswith("Rain expected in about")
+
+
+def _eta_in_message(tmp_path, age_min):
+    radar = HistoryRadar([moving_storm(k, toward=True, age_min=age_min) for k in range(3)])
+    app = build(tmp_path / f"age{age_min}", env={"DIRECTION_FILTER": "1"}, radar=radar)
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    msg = app.notifier.sent[0][1]
+    m = re.match(r"Rain expected in about (\d+) min", msg)
+    assert m, msg
+    assert f"eta {m.group(1)} min" in msg          # detail carries the same adjusted ETA
+    return int(m.group(1))
+
+
+def test_eta_is_adjusted_for_frame_age(tmp_path):
+    fresh = _eta_in_message(tmp_path, 0.0)
+    aged = _eta_in_message(tmp_path, 4.0)
+    assert aged < fresh
+    assert abs((fresh - aged) - 4) <= 1               # rounding of both ETAs
+
+
+def test_direction_filter_falls_back_without_history(tmp_path):
+    # one frame only
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"},
+                radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1                 # never suppress without motion data
+
+
+def test_direction_filter_off_ignores_motion(tmp_path):
+    radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)])
+    app = build(tmp_path, radar=radar)
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1
+
+
+def test_direction_filter_does_not_suppress_preciprate_hit(tmp_path):
+    # reflectivity recedes (would be suppressed alone), but a qualifying PrecipRate echo
+    # ~4 km south of the house (outside NOW_RADIUS_KM, so not "raining now") must still alert.
+    g = np.zeros((101, 101), dtype=np.float32)
+    g[54:57, 50] = 1.0
+    precip = make_frame(g, product="preciprate", valid_time=NOW - timedelta(minutes=2))
+    radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)], preciprate=precip)
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1

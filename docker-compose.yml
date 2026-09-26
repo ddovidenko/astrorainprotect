@@ -1,0 +1,8 @@
+services:
+  astrorainprotect:
+    build: .
+    container_name: astrorainprotect
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./state:/state

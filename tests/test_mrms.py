@@ -322,3 +322,31 @@ def test_radar_source_propagates_errors(fake_decode):
     src = RadarSource(client, 29.97, -95.67)
     with pytest.raises(MrmsError):
         src.fetch_latest("preciprate", NOW)
+
+
+def test_list_keys_follows_continuation_token():
+    """A truncated listing must be followed to the end (issue #21)."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(dict(request.url.params))
+        if "continuation-token" not in request.url.params:
+            return httpx.Response(200, text=_listing_page([K1], truncated=True, token="tok1"))
+        assert request.url.params["continuation-token"] == "tok1"
+        return httpx.Response(200, text=_listing_page([K2]))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    keys = list_keys(client, "CONUS/PrecipRate_00.00/20260924/")
+    assert keys == [K1, K2]
+    assert len(calls) == 2
+
+
+def _listing_page(keys, truncated=False, token=None):
+    items = "".join(f"<Contents><Key>{k}</Key></Contents>" for k in keys)
+    if truncated:
+        extra = ("<IsTruncated>true</IsTruncated>"
+                 f"<NextContinuationToken>{token}</NextContinuationToken>")
+    else:
+        extra = "<IsTruncated>false</IsTruncated>"
+    ns = "http://s3.amazonaws.com/doc/2006-03-01/"
+    return f'<?xml version="1.0"?><ListBucketResult xmlns="{ns}">{items}{extra}</ListBucketResult>'

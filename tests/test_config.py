@@ -85,3 +85,17 @@ def test_config_is_frozen():
 
 def test_config_type():
     assert isinstance(load_config(BASE), Config)
+
+
+@pytest.mark.parametrize("lat,lon", [
+    ("19.5", "-95.67"), ("56", "-95.67"), ("29.97", "-131"), ("29.97", "-59"), ("51.5", "-0.1"),
+])
+def test_coordinates_outside_mrms_coverage_rejected(lat, lon):
+    """MRMS CONUS covers ~20-55 N, 130-60 W (issue #15)."""
+    with pytest.raises(ConfigError, match="MRMS"):
+        load_config({**BASE, "LAT": lat, "LON": lon})
+
+
+def test_coordinates_inside_coverage_accepted():
+    cfg = load_config({**BASE, "LAT": "47.6", "LON": "-122.3"})   # Seattle
+    assert (cfg.lat, cfg.lon) == (47.6, -122.3)

@@ -17,6 +17,11 @@ Keep a Changelog; versions follow SemVer.
 - scripts/record_frames.py and REPLAY_DIR for tuning against recorded frames.
 
 ### Changed
+- Startup fails fast with a clear message when STATE_DIR is not writable, instead of
+  discovering it on the first alert (#14).
+- LAT/LON outside MRMS CONUS coverage (20–55 N, 130–60 W) are rejected at startup (#15).
+- S3 listings follow continuation tokens, so a truncated page can never hide the newest
+  radar file (#21).
 - Rain detected at the house now raises an alert instead of silently re-arming (differs from legacy).
   The notification is titled "Currently raining" with the rate at the house in the body.
 - The DEBUG=2 test notification is sent before the scope gate on every start and reports

@@ -8,6 +8,11 @@ from dataclasses import dataclass, fields
 PRIORITIES = ("min", "low", "default", "high", "urgent")
 
 
+# MRMS CONUS grid: lat 20-55 N, lon 130-60 W (0.01 deg cells). Outside it there is no radar.
+MRMS_LAT = (20.0, 55.0)
+MRMS_LON = (-130.0, -60.0)
+
+
 class ConfigError(ValueError):
     """Raised when a required variable is missing or a value is out of range."""
 
@@ -78,9 +83,17 @@ def load_config(env: Mapping[str, str]) -> Config:
     priority = _str(env, "NTFY_PRIORITY", "high")
     if priority not in PRIORITIES:
         raise ConfigError(f"NTFY_PRIORITY must be one of {PRIORITIES}, got {priority!r}")
+    lat = _float(env, "LAT", None, -90, 90)
+    lon = _float(env, "LON", None, -180, 180)
+    if not (MRMS_LAT[0] <= lat <= MRMS_LAT[1] and MRMS_LON[0] <= lon <= MRMS_LON[1]):
+        raise ConfigError(
+            f"LAT/LON {lat},{lon} is outside MRMS CONUS radar coverage "
+            f"(lat {MRMS_LAT[0]:.0f} to {MRMS_LAT[1]:.0f} N, "
+            f"lon {MRMS_LON[0]:.0f} to {MRMS_LON[1]:.0f})"
+        )
     return Config(
-        lat=_float(env, "LAT", None, -90, 90),
-        lon=_float(env, "LON", None, -180, 180),
+        lat=lat,
+        lon=lon,
         ntfy_url=_str(env, "NTFY_URL", None),
         ntfy_token=_str(env, "NTFY_TOKEN"),
         ntfy_priority=priority,

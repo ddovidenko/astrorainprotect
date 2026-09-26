@@ -14,30 +14,38 @@ It works anywhere inside MRMS coverage, which is the contiguous United States
 (roughly 20–55 N, 130–60 W). All settings come from environment variables; the
 only state it keeps is a small directory with the alert latch and a heartbeat.
 
-## Quick start (Portainer)
+## Quick start
+
+You need Docker (or Portainer) and an ntfy topic: install the ntfy app on your
+phone (iOS or Android), subscribe to a topic name of your choosing, and use
+`https://ntfy.sh/<topic>` as `NTFY_URL`. For a protected topic on your own ntfy
+server, also set `NTFY_TOKEN`.
+
+**Portainer**
 
 1. On the Docker host, create the state directory and hand it to the container's
    user: `mkdir -p /opt/astrorainprotect/state && chown 1000:1000
    /opt/astrorainprotect/state`.
-2. In Portainer, add a Git-repository stack pointing at this repo with compose
-   path `portainer-stack.yml`.
+2. Add a Git-repository stack pointing at this repo with compose path
+   `portainer-stack.yml`.
 3. In the stack's Environment variables section, set `LAT`, `LON`, `NTFY_URL`,
-   and optionally `NTFY_TOKEN` (the rest have working defaults — see
-   Configuration below).
-4. Deploy the stack.
+   and optionally `NTFY_TOKEN`. Everything else has a working default (see
+   Configuration). Set `DEBUG=2` for the first deploy so you get a test
+   notification proving the ntfy path works, then drop it to `1` or `0`.
+4. Deploy.
 
-The GHCR package (`ghcr.io/ddovidenko/astrorainprotect`) must be set to public
-in GitHub package settings, or Portainer needs registry credentials configured
-for `ghcr.io`, before it can pull the image.
-
-## Local development
+**Plain Docker Compose**
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                       # unit tests, no network
-.venv/bin/pytest -m integration        # also hits the live MRMS S3 bucket
-cp .env.example .env && docker compose up --build
+git clone https://github.com/ddovidenko/astrorainprotect
+cd astrorainprotect
+cp .env.example .env      # fill in LAT, LON, NTFY_URL (and NTFY_TOKEN if needed)
+mkdir state               # the container runs as uid 1000; chown 1000:1000 if you are not
+docker compose up -d      # builds the image locally; docker compose logs -f to watch
 ```
+
+The published image is `ghcr.io/ddovidenko/astrorainprotect:latest`; use it in
+place of `build: .` if you prefer not to build.
 
 ## Configuration
 
@@ -162,15 +170,12 @@ line moving crosswise can be suppressed until a different cell becomes
 nearest, which shortens lead time. Leave the filter off until you have
 replayed recorded storms with it on.
 
-To tune without hammering the network or ntfy, record a stretch of frames and
-replay them through the detector in dry-run mode (alerts are logged as
-`WOULD SEND ...` instead of being sent). Recorded frames are a subset around
-your own coordinates and stay local; `frames/` is gitignored.
-
-```
-LAT=.. LON=.. .venv/bin/python scripts/record_frames.py frames/ --minutes 60
-LAT=.. LON=.. NTFY_URL=x REPLAY_DIR=frames/ DIRECTION_FILTER=1 .venv/bin/python -m astrorainprotect
-```
+To tune without waiting for the next storm, record a stretch of radar frames
+during one and replay them through the detector as often as you like, with
+different settings, in dry-run mode (alerts are logged as `WOULD SEND ...`
+instead of being sent). Recorded frames are a small box around your own
+coordinates and stay on your machine. The workflow, with worked examples, is
+in [docs/tuning.md](docs/tuning.md).
 
 ## Gotchas
 
@@ -178,9 +183,15 @@ LAT=.. LON=.. NTFY_URL=x REPLAY_DIR=frames/ DIRECTION_FILTER=1 .venv/bin/python 
   separate `tk_...` credential. Do not conflate them.
 - The ntfy iOS app has had a bug where notifications arrive silent; not something
   this project can fix. `Priority` and emoji tags do not control sound.
-- Portainer's web-editor stacks cannot `build:`; hence the GHCR image.
-- Docker creates a *directory* if a bind-mounted file path is missing on the
-  host; avoid host-file mounts entirely in the new version.
+- Docker creates a *directory* if a bind-mounted path is missing on the host,
+  owned by root. Create the state directory yourself and give it to uid 1000.
 - Pirate Weather free tier has a monthly call cap; polling every 5 minutes fits.
   Do not poll it faster.
-- MRMS timestamps are UTC; log in local time but keep the frame timestamp UTC.
+- Radar frame times in the log are UTC (`frame=20:12:39Z`); everything else is
+  in `TZ`.
+
+## Contributing and design notes
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, tests,
+release flow, and where the design spec lives. Bugs and ideas go in
+[GitHub issues](https://github.com/ddovidenko/astrorainprotect/issues).

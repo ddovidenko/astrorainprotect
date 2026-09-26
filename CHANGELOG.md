@@ -18,3 +18,7 @@ Keep a Changelog; versions follow SemVer.
 
 ### Changed
 - Rain detected at the house now raises an alert instead of silently re-arming (differs from legacy).
+  The notification is titled "Currently raining" with the rate at the house in the body.
+- The DEBUG=2 test notification is sent before the scope gate on every start and reports
+  whether scopes are online, so a restarted container always announces itself (legacy stayed silent
+  until a scope came up).

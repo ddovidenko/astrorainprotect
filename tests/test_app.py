@@ -137,10 +137,11 @@ def test_rain_at_house_alerts_when_unlatched(tmp_path):
     line = run_cycle(app)
     assert len(app.notifier.sent) == 1
     title, msg = app.notifier.sent[0]
-    assert title == "Rain incoming"
-    assert "raining at the house now" in msg
+    assert title == "Currently raining"
+    assert msg.startswith("Currently raining at the house (1.0 mm/h)")
+    assert "preciprate" not in msg                     # the house cell is not listed twice
     assert app.state.latched()
-    assert "raining_now=1" in line
+    assert "raining_now=1" in line and "sources=house" in line
 
 
 def test_rain_at_house_while_latched_skips(tmp_path):
@@ -233,6 +234,30 @@ def test_debug2_sends_one_test_notification(tmp_path):
     run_cycle(app)
     run_cycle(app)
     assert [t for t, _ in app.notifier.sent] == ["Rain alert test"]
+
+
+def test_debug2_test_send_runs_even_when_scope_offline(tmp_path):
+    radar = FakeRadar(empty("preciprate"), storm("reflectivity", 40.0))
+    app = build(tmp_path, env={"DEBUG": "2", "SCOPE_HOSTS": "10.0.0.5,10.0.0.6"}, radar=radar,
+                scope=lambda: [])
+    app.state.set_latch(NOW.timestamp())
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain alert test"]
+    assert "No scope online (10.0.0.5,10.0.0.6); waiting" in app.notifier.sent[0][1]
+    assert radar.calls == 0                            # the gate still skipped the checks
+    assert not app.state.latched()                     # and still reset the latch
+
+
+def test_debug2_test_message_names_online_scopes(tmp_path):
+    app = build(tmp_path, env={"DEBUG": "2", "SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: ["10.0.0.5"])
+    run_cycle(app)
+    assert "Scopes online: 10.0.0.5" in app.notifier.sent[0][1]
+
+
+def test_debug2_test_message_without_scope_gate(tmp_path):
+    app = build(tmp_path, env={"DEBUG": "2"})
+    run_cycle(app)
+    assert "Scope gate disabled" in app.notifier.sent[0][1]
 
 
 def test_debug2_test_marker_cleared_by_main_start(tmp_path):

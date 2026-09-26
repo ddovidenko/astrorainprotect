@@ -7,7 +7,7 @@ RADAR_ETA = Trigger(source="radar", eta_min=12.0, detail="reflectivity 41 dBZ, 8
 PW = Trigger(source="pirate weather", eta_min=25.0, detail="prob 60%")
 
 
-RAINING = Trigger(source="radar", eta_min=0.0, detail="raining at the house now (0.3 mm/h)")
+RAINING = Trigger(source="house", eta_min=0.0, detail="0.3 mm/h")
 
 
 def inputs(triggers=(), latched=False, latch_age_sec=None, repeat_min=0):
@@ -56,9 +56,22 @@ def test_rearm_when_no_trigger():
 def test_raining_trigger_sends_when_unlatched():
     d = decide(inputs([RAINING]))
     assert d.action is Action.SEND
-    assert d.title == "Rain incoming"
-    assert d.message.startswith("Rain at the house now")
-    assert "raining at the house now (0.3 mm/h)" in d.message
+    assert d.title == "Currently raining"
+    assert d.message == "Currently raining at the house (0.3 mm/h)"
+
+
+def test_raining_with_nearby_storm_lists_both():
+    d = decide(inputs([RADAR, RAINING]))
+    assert d.title == "Currently raining"
+    assert d.message == (
+        "Currently raining at the house (0.3 mm/h); radar: reflectivity 41 dBZ, 8.2 km to the SW"
+    )
+
+
+def test_raining_repeat_title():
+    d = decide(inputs([RAINING], latched=True, latch_age_sec=601, repeat_min=10))
+    assert d.action is Action.REPEAT
+    assert d.title == "Currently raining (still)"
 
 
 def test_raining_trigger_latched_skips():

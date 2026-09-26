@@ -110,8 +110,10 @@ the message says which source(s) fired.
 Port these semantics from `legacy/rain-check.sh` exactly; they are tuned and
 tested:
 
-- One alert per rain event, latched in `/state/alerted`. Re-armed when it is
-  raining now or when no trigger remains active.
+- One alert per rain event, latched in `/state/alerted`. Re-armed only when no
+  trigger remains active. Rain detected at the house is itself a trigger
+  (notification "Currently raining"); the legacy rule of re-arming while it
+  rains was dropped because it silenced cells that form in place over the house.
 - `REPEAT_MIN` (default 0): while a trigger stays active, re-send every N
   minutes with updated ETA/distance, title "Rain incoming (still)". Uses the
   latch file's mtime as the timer.

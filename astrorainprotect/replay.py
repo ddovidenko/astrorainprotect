@@ -17,7 +17,7 @@ log = logging.getLogger("astrorainprotect")
 
 
 class DryRunNotifier:
-    def send(self, title: str, message: str) -> bool:
+    def send(self, title: str, message: str, priority: str | None = None) -> bool:
         log.info("WOULD SEND %s: %s", title, message)
         return True
 

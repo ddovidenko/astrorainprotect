@@ -55,3 +55,14 @@ def test_send_network_error(caplog):
 
     assert make(boom).send("t", "m") is False
     assert "refused" in caplog.records[-1].getMessage()
+
+
+def test_send_priority_override():
+    seen = {}
+
+    def handler(request):
+        seen.update(headers=dict(request.headers))
+        return httpx.Response(200)
+
+    make(handler, priority="urgent").send("t", "m", priority="default")
+    assert seen["headers"]["priority"] == "default"

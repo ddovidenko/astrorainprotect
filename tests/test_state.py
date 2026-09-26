@@ -46,3 +46,12 @@ def test_heartbeat(tmp_path):
     assert s.heartbeat_age_sec(10.0) is None
     s.heartbeat(10.0)
     assert s.heartbeat_age_sec(25.0) == 15.0
+
+
+def test_scope_set_persists(tmp_path):
+    s = State(tmp_path / "state", tmp_path / "tmp")
+    assert s.last_scopes() is None                       # unknown until first record
+    s.set_scopes({"10.0.0.6", "10.0.0.5"})
+    assert State(tmp_path / "state", tmp_path / "tmp").last_scopes() == {"10.0.0.5", "10.0.0.6"}
+    s.set_scopes(set())
+    assert s.last_scopes() == set()                      # recorded "none online" is not unknown

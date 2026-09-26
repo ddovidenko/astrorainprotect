@@ -7,9 +7,10 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -134,6 +135,58 @@ def _scope_status(cfg: Config, online: list[str] | None) -> str:
     return f"No scope online ({cfg.scope_hosts}); waiting for one before checking radar."
 
 
+def _announce_scope_changes(app: App, online: list[str]) -> None:
+    """Issue #22: one notification per poll when any scope host comes or goes.
+    The last known set lives in the state dir, so a restart does not re-announce."""
+    now_online = set(online)
+    before = app.state.last_scopes()
+    if before is None or before == now_online:
+        if before is None:
+            app.state.set_scopes(now_online)
+        return
+    came = sorted(now_online - before)
+    went = sorted(before - now_online)
+    parts = []
+    if came:
+        parts.append(f"{', '.join(came)} came online")
+    if went:
+        parts.append(f"{', '.join(went)} went offline")
+    if now_online:
+        still = ", ".join(sorted(now_online))
+        tail = "Radar checks active." if not went else f"Still online: {still}."
+    else:
+        tail = "No scope online; radar checks paused until one returns."
+    title = "Scopes changed" if came and went else ("Scope online" if came else "Scope offline")
+    if app.notifier.send(title, f"{'; '.join(parts)}. {tail}", priority="default"):
+        log.info("scope change announced: %s", "; ".join(parts))
+    app.state.set_scopes(now_online)
+
+
+STARTUP_FAILURE_MARKER = "astrorainprotect_startup_failure_sent"
+
+
+def notify_startup_failure(env: Mapping[str, str], reason: str, tmp_dir: Path | str = "/tmp",
+                           client: httpx.Client | None = None) -> bool:
+    """Issue #26: tell the phone once per container lifetime that startup failed."""
+    url = (env.get("NTFY_URL") or "").strip()
+    if not url:
+        return False
+    marker = Path(tmp_dir) / STARTUP_FAILURE_MARKER
+    if marker.exists():
+        return False
+    token = (env.get("NTFY_TOKEN") or "").strip()
+    notifier = Notifier(client or httpx.Client(), url, token, "high")
+    sent = notifier.send("astrorainprotect failed to start", f"{reason} The container will keep "
+                         "restarting until this is fixed; no rain alerts until then.")
+    if sent:
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.touch()
+        except OSError:
+            pass
+    return sent
+
+
 def _maybe_send_test(app: App, scope_status: str) -> None:
     if app.cfg.debug >= 2 and not app.state.test_sent():
         if app.notifier.send(TITLE_TEST, f"Test from astrorainprotect. {scope_status}"):
@@ -155,6 +208,8 @@ def run_cycle(app: App) -> str:
     # and says whether it is checking radar or waiting for a scope.
     online = app.scope_check() if cfg.scope_hosts else None
     _maybe_send_test(app, _scope_status(cfg, online))
+    if online is not None:
+        _announce_scope_changes(app, online)
 
     if online is not None:
         if not online:
@@ -302,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config(os.environ)
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)
+        notify_startup_failure(os.environ, f"Config error: {exc}.", "/tmp")
         return 2
     _setup_logging(cfg.debug)
     log.info("astrorainprotect starting\n%s", describe(cfg))
@@ -312,8 +368,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         State(cfg.state_dir).heartbeat(time.time())   # fail fast if the volume is not ours
     except OSError as exc:
-        print(f"STATE_DIR {cfg.state_dir} is not writable ({exc}). The container runs as uid 1000; "
-              f"create the directory and chown 1000:1000 it.", file=sys.stderr)
+        reason = (f"STATE_DIR {cfg.state_dir} is not writable ({exc}). The container runs as "
+                  f"uid 1000; create the directory and chown 1000:1000 it.")
+        print(reason, file=sys.stderr)
+        notify_startup_failure(os.environ, reason, "/tmp")
         return 3
     app = build_app(cfg)
     app.state.clear_test_marker()

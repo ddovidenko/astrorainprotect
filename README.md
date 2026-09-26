@@ -102,6 +102,15 @@ script):
   overhead — in-place convection, the case this project exists for — would
   never have produced an alert. Pirate Weather's own "raining now" never
   silences a radar trigger.
+- **Scope announcements**: with `SCOPE_HOSTS` set, any host coming online or
+  going offline between polls sends a `default`-priority notification ("Scope
+  online: 192.168.1.235 came online. Radar checks active." / "Scope offline: ...
+  No scope online; radar checks paused until one returns."), so you know the
+  monitor saw the scope you just set up. The last known set is kept in the
+  state directory, so a container restart does not re-announce.
+- **Startup failures notify**: a config error or an unwritable state directory
+  sends one high-priority "astrorainprotect failed to start" message per
+  container lifetime before exiting, so a broken deploy is not silent.
 - **Rearm**: once no trigger remains (nothing nearby, nothing overhead, no
   Pirate Weather ETA) the latch clears, so the next qualifying cell can alert
   again.

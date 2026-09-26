@@ -1,0 +1,32 @@
+# Paste into Portainer: Stacks > Add stack > Web editor.
+# Host file expected at /opt/rain-alert/rain-check.sh (change path to taste).
+# Set PW_KEY, LAT, LON, NTFY_URL, NTFY_TOKEN, DEBUG in the stack's
+# "Environment variables" section below the editor.
+
+services:
+  rain-alert:
+    image: alpine:3.20
+    container_name: rain-alert
+    restart: unless-stopped
+    environment:
+      - TZ=America/Chicago
+      - PW_KEY=${PW_KEY}
+      - LAT=${LAT}
+      - LON=${LON}
+      - NTFY_URL=${NTFY_URL}
+      - NTFY_TOKEN=${NTFY_TOKEN}
+      - DEBUG=${DEBUG:-0}
+      - LOOKAHEAD_MIN=${LOOKAHEAD_MIN:-30}
+      - MIN_PROB=${MIN_PROB:-0.5}
+      - MIN_INTENSITY=${MIN_INTENSITY:-0.5}
+      - RAINING_NOW=${RAINING_NOW:-0.1}
+      - REPEAT_MIN=${REPEAT_MIN:-0}
+      - SCOPE_HOSTS=${SCOPE_HOSTS:-}
+    volumes:
+      - /opt/rain-alert/rain-check.sh:/rain-check.sh:ro
+      - /opt/rain-alert/state:/state
+    # no custom image to build: install tools at start, clear the DEBUG=2 test marker, then loop
+    command: >
+      sh -c "apk add --no-cache curl jq tzdata > /dev/null &&
+             rm -f /tmp/test_sent &&
+             while true; do sh /rain-check.sh; sleep 300; done"

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "astrorainprotect"
+version = "0.1.0"
+description = "Radar-based rain alarm that pushes to ntfy"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+dependencies = [
+  "numpy>=2.0",
+  "eccodes>=2.40",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+astrorainprotect = "astrorainprotect.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["astrorainprotect"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: needs network access to S3; skipped when offline"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

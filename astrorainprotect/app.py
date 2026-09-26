@@ -304,6 +304,12 @@ def main(argv: list[str] | None = None) -> int:
         from astrorainprotect.replay import run_replay
         run_replay(cfg, cfg.replay_dir)
         return 0
+    try:
+        State(cfg.state_dir).heartbeat(time.time())   # fail fast if the volume is not ours
+    except OSError as exc:
+        print(f"STATE_DIR {cfg.state_dir} is not writable ({exc}). The container runs as uid 1000; "
+              f"create the directory and chown 1000:1000 it.", file=sys.stderr)
+        return 3
     app = build_app(cfg)
     app.state.clear_test_marker()
 

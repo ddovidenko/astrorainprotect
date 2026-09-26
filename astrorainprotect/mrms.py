@@ -64,15 +64,37 @@ def newest_key(keys: Iterable[str]) -> str | None:
     return max(keys, key=key_time) if keys else None
 
 
+MAX_LISTING_PAGES = 10  # 10 000 keys; a day of one product is ~720
+
+
+def _continuation_token(xml_text: str) -> str | None:
+    root = ET.fromstring(xml_text)
+    truncated = root.findtext(f"{_S3_NS}IsTruncated")
+    if truncated != "true":
+        return None
+    return root.findtext(f"{_S3_NS}NextContinuationToken")
+
+
 def list_keys(client: httpx.Client, prefix: str) -> list[str]:
-    try:
-        r = client.get(f"{BUCKET_URL}/", params={"list-type": "2", "prefix": prefix,
-                                                  "max-keys": "1000"}, timeout=20.0)
-    except httpx.HTTPError as exc:
-        raise MrmsError(f"S3 listing failed for {prefix}: {exc}") from exc
-    if r.status_code != 200:
-        raise MrmsError(f"S3 listing returned HTTP {r.status_code} for {prefix}")
-    return parse_listing(r.text)
+    """All keys under prefix, following S3 continuation tokens so a truncated
+    listing can never hide the newest file."""
+    keys: list[str] = []
+    token: str | None = None
+    for _ in range(MAX_LISTING_PAGES):
+        params = {"list-type": "2", "prefix": prefix, "max-keys": "1000"}
+        if token:
+            params["continuation-token"] = token
+        try:
+            r = client.get(f"{BUCKET_URL}/", params=params, timeout=20.0)
+        except httpx.HTTPError as exc:
+            raise MrmsError(f"S3 listing failed for {prefix}: {exc}") from exc
+        if r.status_code != 200:
+            raise MrmsError(f"S3 listing returned HTTP {r.status_code} for {prefix}")
+        keys += parse_listing(r.text)
+        token = _continuation_token(r.text)
+        if not token:
+            return keys
+    raise MrmsError(f"S3 listing for {prefix} exceeded {MAX_LISTING_PAGES} pages")
 
 
 MISSING_BELOW = {"preciprate": 0.0, "reflectivity": -990.0}

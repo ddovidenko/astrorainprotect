@@ -3,6 +3,7 @@ import re
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+import pytest
 
 from astrorainprotect.app import RADAR_MAX_AGE, App, radar_status, run_cycle
 from astrorainprotect.config import load_config
@@ -415,3 +416,23 @@ def test_direction_filter_does_not_suppress_preciprate_hit(tmp_path):
     app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
     run_cycle(app)
     assert len(app.notifier.sent) == 1
+
+
+def test_main_exits_when_state_dir_not_writable(monkeypatch, capsys, tmp_path):
+    """Issue #14: discover an unwritable STATE_DIR at startup, not on the first alert."""
+    import os as _os
+
+    import astrorainprotect.app as appmod
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    ro.chmod(0o500)
+    if _os.access(ro, _os.W_OK):
+        pytest.skip("running as root; permissions are not enforced")
+    monkeypatch.setattr("os.environ", {**BASE, "STATE_DIR": str(ro)})
+    monkeypatch.setattr(appmod, "build_app", lambda cfg: pytest.fail("loop must not start"))
+    try:
+        assert appmod.main([]) == 3
+    finally:
+        ro.chmod(0o700)
+    err = capsys.readouterr().err
+    assert "STATE_DIR" in err and str(ro) in err and "1000" in err

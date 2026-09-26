@@ -6,6 +6,10 @@ Keep a Changelog; versions follow SemVer.
 ## [Unreleased]
 
 ### Added
+- Scope online/offline announcements: any `SCOPE_HOSTS` host coming or going between polls
+  sends a default-priority notification; state persists across restarts (#22).
+- One high-priority "failed to start" notification per container lifetime on config errors or an
+  unwritable STATE_DIR (#26).
 - Radar-based rain detection from NOAA MRMS (reflectivity + PrecipRate) with the
   legacy alert semantics: one alert per event, optional repeat, scope-online gate,
   DEBUG levels, test notification.

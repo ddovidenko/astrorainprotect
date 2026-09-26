@@ -35,10 +35,11 @@ class FakeRadar:
 
 class FakeNotifier:
     def __init__(self, ok=True):
-        self.ok, self.sent = ok, []
+        self.ok, self.sent, self.priorities = ok, [], []
 
-    def send(self, title, message):
+    def send(self, title, message, priority=None):
         self.sent.append((title, message))
+        self.priorities.append(priority)
         return self.ok
 
 
@@ -485,3 +486,174 @@ def test_module_entry_hides_debug_from_eckit(tmp_path):
     assert out.returncode == 0, out.stderr
     assert "PRE-MAIN" not in out.stdout + out.stderr
     assert "DEBUG=2" in out.stdout                      # the app still saw its own DEBUG
+
+
+# --- issue #22: scope online/offline announcements -----------------------------------------
+
+
+def scoped(tmp_path, scope):
+    return build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5,10.0.0.6"}, scope=scope)
+
+
+def test_first_cycle_records_scopes_silently(tmp_path):
+    app = scoped(tmp_path, lambda: ["10.0.0.5"])
+    run_cycle(app)
+    assert app.notifier.sent == []
+    assert app.state.last_scopes() == {"10.0.0.5"}
+
+
+def test_scope_going_offline_notifies_default_priority(tmp_path):
+    app = scoped(tmp_path, lambda: ["10.0.0.5", "10.0.0.6"])
+    run_cycle(app)
+    app.scope_check = lambda: ["10.0.0.5"]
+    run_cycle(app)
+    assert app.notifier.sent == [
+        ("Scope offline", "10.0.0.6 went offline. Online: 10.0.0.5. Radar checks active.")
+    ]
+    assert app.notifier.priorities[-1] == "default"
+    assert app.state.last_scopes() == {"10.0.0.5"}
+
+
+def test_last_scope_offline_says_checks_paused(tmp_path):
+    app = scoped(tmp_path, lambda: ["10.0.0.5"])
+    run_cycle(app)
+    app.scope_check = lambda: []
+    line = run_cycle(app)
+    assert app.notifier.sent == [("Scope offline", "10.0.0.5 went offline. No scope online; "
+                                                   "radar checks paused until one returns.")]
+    assert "outcome=scope-offline" in line
+
+
+def test_scope_coming_online_notifies(tmp_path):
+    app = scoped(tmp_path, lambda: [])
+    run_cycle(app)
+    app.scope_check = lambda: ["10.0.0.6"]
+    run_cycle(app)
+    assert app.notifier.sent == [
+        ("Scope online", "10.0.0.6 came online. Online: 10.0.0.6. Radar checks active.")
+    ]
+
+
+def test_both_directions_in_one_cycle(tmp_path):
+    app = scoped(tmp_path, lambda: ["10.0.0.5"])
+    run_cycle(app)
+    app.scope_check = lambda: ["10.0.0.6"]
+    run_cycle(app)
+    assert app.notifier.sent == [("Scopes changed", "10.0.0.6 came online; 10.0.0.5 went offline. "
+                                                    "Online: 10.0.0.6. Radar checks active.")]
+
+
+def test_unchanged_scopes_stay_silent_and_no_gate_means_no_announcements(tmp_path):
+    app = scoped(tmp_path, lambda: ["10.0.0.5"])
+    run_cycle(app)
+    run_cycle(app)
+    assert app.notifier.sent == []
+    plain = build(tmp_path / "plain")
+    run_cycle(plain)
+    assert plain.notifier.sent == [] and plain.state.last_scopes() is None
+
+
+def test_scope_set_is_persisted_and_compared_across_restart(tmp_path):
+    app = scoped(tmp_path, lambda: ["10.0.0.5"])
+    run_cycle(app)
+    assert (tmp_path / "state" / "scopes_online").read_text() == "10.0.0.5"
+    same = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5,10.0.0.6"}, scope=lambda: ["10.0.0.5"])
+    run_cycle(same)                                    # same state dir, same scopes: silent
+    assert same.notifier.sent == []
+    changed = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5,10.0.0.6"}, scope=lambda: [])
+    run_cycle(changed)                                 # changed while we were down: announced
+    assert [t for t, _ in changed.notifier.sent] == ["Scope offline"]
+
+
+def test_failed_announcement_is_retried_next_poll(tmp_path):
+    app = scoped(tmp_path, lambda: ["10.0.0.5"])
+    run_cycle(app)
+    app.scope_check = lambda: []
+    app.notifier.ok = False
+    run_cycle(app)
+    assert app.state.last_scopes() == {"10.0.0.5"}     # not recorded: the change is still pending
+    assert app.failures["ntfy"] == 1
+    app.notifier.ok = True
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Scope offline", "Scope offline"]
+    assert app.state.last_scopes() == set()
+
+
+def test_state_write_failure_never_blocks_radar(tmp_path, caplog):
+    caplog.set_level(logging.ERROR)
+    app = scoped(tmp_path, lambda: ["10.0.0.5"])
+
+    def boom(hosts):
+        raise OSError(28, "No space left on device")
+
+    app.state.set_scopes = boom
+    line = run_cycle(app)
+    assert "outcome=" in line                          # the cycle completed
+    assert any("scope announcement failed" in r.getMessage() for r in caplog.records)
+    assert app.state.heartbeat_age_sec(NOW.timestamp()) == 0.0
+
+
+def test_startup_failure_survives_unparseable_url(tmp_path, capsys):
+    from astrorainprotect.app import notify_startup_failure
+    assert notify_startup_failure({"NTFY_URL": "https://[::1"}, "bad", tmp_path) is False
+    assert "could not send" in capsys.readouterr().err
+
+
+# --- issue #26: fatal startup errors notify --------------------------------------------------
+
+
+def test_startup_failure_notification_headers_and_marker(tmp_path):
+    import httpx as _httpx
+
+    from astrorainprotect.app import notify_startup_failure
+    seen = []
+
+    def handler(request):
+        seen.append((dict(request.headers), request.content.decode()))
+        return _httpx.Response(200)
+
+    client = _httpx.Client(transport=_httpx.MockTransport(handler))
+    env = {"NTFY_URL": "https://ntfy.example.net/rain", "NTFY_TOKEN": "tk_x"}
+    assert notify_startup_failure(env, "LAT is required", tmp_path, client=client) is True
+    assert notify_startup_failure(env, "LAT is required", tmp_path, client=client) is False  # once
+    assert len(seen) == 1
+    headers, body = seen[0]
+    assert headers["title"] == "astrorainprotect failed to start"
+    assert headers["priority"] == "high" and headers["authorization"] == "Bearer tk_x"
+    assert "LAT is required" in body
+
+
+def test_startup_failure_without_url_is_noop(tmp_path):
+    from astrorainprotect.app import notify_startup_failure
+    assert notify_startup_failure({}, "anything", tmp_path) is False
+
+
+def test_main_config_error_notifies(monkeypatch, capsys, tmp_path):
+    import astrorainprotect.app as appmod
+    calls = []
+    monkeypatch.setattr(appmod, "notify_startup_failure",
+                        lambda env, reason, tmp_dir, client=None: calls.append(reason) or True)
+    monkeypatch.setattr("os.environ", {"LON": "-95.67", "NTFY_URL": "https://ntfy.example.net/r"})
+    assert appmod.main([]) == 2
+    assert calls and "LAT is required" in calls[0]
+
+
+def test_main_state_dir_error_notifies(monkeypatch, capsys, tmp_path):
+    import os as _os
+
+    import astrorainprotect.app as appmod
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    ro.chmod(0o500)
+    if _os.access(ro, _os.W_OK):
+        pytest.skip("running as root; permissions are not enforced")
+    calls = []
+    monkeypatch.setattr(appmod, "notify_startup_failure",
+                        lambda env, reason, tmp_dir, client=None: calls.append(reason) or True)
+    monkeypatch.setattr("os.environ", {**BASE, "STATE_DIR": str(ro)})
+    monkeypatch.setattr(appmod, "build_app", lambda cfg: pytest.fail("loop must not start"))
+    try:
+        assert appmod.main([]) == 3
+    finally:
+        ro.chmod(0o700)
+    assert calls and "STATE_DIR" in calls[0]

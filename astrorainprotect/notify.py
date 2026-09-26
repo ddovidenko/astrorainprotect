@@ -17,8 +17,8 @@ class Notifier:
     ) -> None:
         self._client, self._url, self._token, self._priority = client, url, token, priority
 
-    def send(self, title: str, message: str) -> bool:
-        headers = {"Title": title, "Priority": self._priority, "Tags": TAGS}
+    def send(self, title: str, message: str, priority: str | None = None) -> bool:
+        headers = {"Title": title, "Priority": priority or self._priority, "Tags": TAGS}
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
         try:

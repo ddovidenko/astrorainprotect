@@ -12,6 +12,7 @@ class State:
         self._latch = self._dir / "alerted"
         self._heartbeat = self._dir / "heartbeat"
         self._test_marker = Path(tmp_dir) / "astrorainprotect_test_sent"
+        self._scopes = self._dir / "scopes_online"
 
     def _touch(self, path: Path, now: float) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -52,3 +53,15 @@ class State:
 
     def heartbeat_age_sec(self, now: float) -> float | None:
         return self._age(self._heartbeat, now)
+
+    def last_scopes(self) -> set[str] | None:
+        """Hosts that were online at the last poll, or None if never recorded."""
+        try:
+            text = self._scopes.read_text()
+        except OSError:          # missing, unreadable, or wrong owner: treat as unknown
+            return None
+        return {h for h in text.split(",") if h}
+
+    def set_scopes(self, hosts: set[str]) -> None:
+        self._dir.mkdir(parents=True, exist_ok=True)
+        self._scopes.write_text(",".join(sorted(hosts)))

@@ -453,7 +453,7 @@ def test_radar_failure_counters_are_per_class(tmp_path, caplog):
     assert app.failures["radar.listing"] == 0           # class with no error this cycle resets
     assert app.failures["radar.decode"] == 2
     msgs = [r.getMessage() for r in caplog.records]
-    assert any(m.startswith("ERROR radar decode") and "consecutive failures: 2" in m for m in msgs)
+    assert any(m.startswith("radar decode") and "consecutive failures: 2" in m for m in msgs)
 
 
 def test_scope_offline_summary_line_has_full_field_set(tmp_path):

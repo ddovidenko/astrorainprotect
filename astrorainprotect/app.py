@@ -142,7 +142,7 @@ def _maybe_send_test(app: App, scope_status: str) -> None:
         else:
             app.failures["ntfy"] += 1
             log.error(
-                "ERROR ntfy: test send failed (consecutive failures: %d)", app.failures["ntfy"]
+                "ntfy: test send failed (consecutive failures: %d)", app.failures["ntfy"]
             )
 
 
@@ -180,7 +180,7 @@ def run_cycle(app: App) -> str:
             failed_kinds.add(kind)
             statuses[product] = RadarStatus(False, f"fetch failed: {exc}")
             app.failures[f"radar.{kind}"] += 1
-            log.error("ERROR radar %s %s: %s (consecutive failures: %d)",
+            log.error("radar %s %s: %s (consecutive failures: %d)",
                       kind, product, exc, app.failures[f"radar.{kind}"])
             continue
         statuses[product] = status
@@ -220,7 +220,7 @@ def run_cycle(app: App) -> str:
         except PirateError as exc:
             app.failures["pirate"] += 1
             log.error(
-                "ERROR pirate weather: %s (consecutive failures: %d)",
+                "pirate weather: %s (consecutive failures: %d)",
                 exc, app.failures["pirate"],
             )
             pr = None
@@ -249,7 +249,7 @@ def run_cycle(app: App) -> str:
         else:
             app.failures["ntfy"] += 1
             log.error(
-                "ERROR ntfy: send failed (consecutive failures: %d)", app.failures["ntfy"]
+                "ntfy: send failed (consecutive failures: %d)", app.failures["ntfy"]
             )
             outcome = "send-failed"
     elif decision.action is Action.REARM:

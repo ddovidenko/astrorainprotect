@@ -11,7 +11,11 @@ requires-python = ">=3.12"
 license = { file = "LICENSE" }
 dependencies = [
   "numpy>=2.0",
-  "eccodes>=2.40",
+  # The eccodes 2.39.2 x86_64 wheels for CPython <= 3.13 bundle an eckit-free libeccodes;
+  # newer eccodeslib wheels drag in ~125 MB of eckit that this project never calls. There is
+  # no such wheel for Python 3.14 or for aarch64, so those keep the current binding (#12).
+  "eccodes==2.39.2; python_version < '3.14' and platform_machine == 'x86_64'",
+  "eccodes>=2.40; python_version >= '3.14' or platform_machine != 'x86_64'",
   "httpx>=0.27",
 ]
 

@@ -415,6 +415,16 @@ def test_direction_filter_projects_every_cell(tmp_path):
     assert m, msg
     assert 10 <= int(m.group(1)) <= 25
 
+def test_arriving_now_detail_has_no_zero_eta(tmp_path):
+    """Issue #32: when the ETA rounds to 0 the detail must not say 'eta 0 min'."""
+    radar = HistoryRadar([moving_storm(k, toward=True, age_min=12.0) for k in range(3)])
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    msg = app.notifier.sent[0][1]
+    assert msg.startswith("Rain arriving now ("), msg
+    assert "eta" not in msg
+
 
 def test_direction_filter_falls_back_without_history(tmp_path):
     # one frame only

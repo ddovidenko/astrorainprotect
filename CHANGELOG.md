@@ -6,6 +6,8 @@ Keep a Changelog; versions follow SemVer.
 ## [Unreleased]
 
 ### Added
+- `DIRECTION_FILTER=1` projects every qualifying cell, not only the nearest: a crosswise line
+  alerts as soon as any part of it is headed for the site, ETA is the earliest entry (#11).
 - Scope online/offline announcements: any `SCOPE_HOSTS` host coming or going between polls
   sends a default-priority notification; state persists across restarts (#22).
 - One high-priority "failed to start" notification per container lifetime on config errors or an

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -37,6 +37,9 @@ class Detection:
     nearest_km: float | None
     nearest_bearing_deg: float | None
     max_value: float
+    # (N, 2) east/north km offsets of every qualifying cell, for motion projection (#11).
+    # None when there are none. Excluded from equality: arrays don't compare cleanly.
+    offsets_km: np.ndarray | None = field(default=None, compare=False, repr=False)
 
     def describe(self) -> str:
         if self.nearest_km is None or self.nearest_bearing_deg is None:
@@ -59,11 +62,14 @@ def detect(frame: Frame, home_lat: float, home_lon: float, *, now_radius_km: flo
     n = int(qualifying.sum())
     max_value = float(values[in_alert].max()) if in_alert.any() else 0.0
 
-    nearest_km = nearest_bearing = None
+    nearest_km = nearest_bearing = offsets = None
     if n:
         idx = np.argmin(np.where(qualifying, dist, np.inf))
         j, i = np.unravel_index(idx, dist.shape)
         nearest_km, nearest_bearing = float(dist[j, i]), float(bearing[j, i])
+        b = np.radians(bearing[qualifying])
+        r = dist[qualifying]
+        offsets = np.column_stack((r * np.sin(b), r * np.cos(b))).astype(np.float64)
 
     return Detection(
         product=frame.product,
@@ -74,4 +80,5 @@ def detect(frame: Frame, home_lat: float, home_lon: float, *, now_radius_km: flo
         nearest_km=nearest_km,
         nearest_bearing_deg=nearest_bearing,
         max_value=max_value,
+        offsets_km=offsets,
     )

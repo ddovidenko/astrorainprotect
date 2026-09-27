@@ -133,3 +133,38 @@ def test_project_stationary_outside():
     m = Motion(u_km_per_min=0.0, v_km_per_min=0.0, confidence=1, frames_used=3)
     a = project(det(8.0, 90.0), m, hit_radius_km=5.0, lookahead_min=60)
     assert not a.will_hit and a.closest_km == pytest.approx(8.0)
+
+
+def test_project_uses_every_cell_not_just_nearest():
+    """Issue #11: a cell farther away can be the one that hits; the nearest may pass wide."""
+    # nearest cell 8 km due south, another 12 km due west; storm moving east at 1 km/min
+    offsets = np.array([[0.0, -8.0], [-12.0, 0.0]])
+    d = Detection("reflectivity", False, 0.0, 2, True, 8.0, 180.0, 40.0, offsets_km=offsets)
+    m = Motion(u_km_per_min=1.0, v_km_per_min=0.0, confidence=1, frames_used=3)
+    a = project(d, m, hit_radius_km=5.0, lookahead_min=60)
+    assert a.will_hit
+    assert a.eta_min == pytest.approx(7.0, abs=0.1)        # west cell enters the 5 km circle
+    assert a.closest_km == pytest.approx(0.0, abs=1e-6)
+
+
+def test_project_all_cells_miss_reports_min_closest():
+    offsets = np.array([[0.0, -8.0], [0.0, 12.0]])           # south and north, moving east
+    d = Detection("reflectivity", False, 0.0, 2, True, 8.0, 180.0, 40.0, offsets_km=offsets)
+    m = Motion(u_km_per_min=1.0, v_km_per_min=0.0, confidence=1, frames_used=3)
+    a = project(d, m, hit_radius_km=5.0, lookahead_min=60)
+    assert not a.will_hit and a.eta_min is None
+    assert a.closest_km == pytest.approx(8.0)
+
+
+def test_project_eta_is_earliest_entering_cell():
+    offsets = np.array([[-20.0, 0.0], [-10.0, 0.0]])
+    d = Detection("reflectivity", False, 0.0, 2, True, 10.0, 270.0, 40.0, offsets_km=offsets)
+    m = Motion(u_km_per_min=1.0, v_km_per_min=0.0, confidence=1, frames_used=3)
+    a = project(d, m, hit_radius_km=5.0, lookahead_min=60)
+    assert a.will_hit and a.eta_min == pytest.approx(5.0, abs=0.1)
+
+
+def test_project_without_offsets_falls_back_to_nearest():
+    m = Motion(u_km_per_min=1.0, v_km_per_min=0.0, confidence=1, frames_used=3)
+    a = project(det(10.0, 270.0), m, hit_radius_km=5.0, lookahead_min=60)
+    assert a.will_hit and a.eta_min == pytest.approx(5.0, abs=0.1)

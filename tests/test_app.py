@@ -393,6 +393,28 @@ def test_eta_is_adjusted_for_frame_age(tmp_path):
     assert abs((fresh - aged) - 4) <= 1               # rounding of both ETAs
 
 
+def crosswise_storm(k):
+    """Two reflectivity blobs moving east one cell per frame (issue #11).
+
+    Blob A, ~9 km SSW, is the nearest echo but passes ~8 km south of the house.
+    Blob B, ~13 km W, is farther but heads straight for the house.
+    """
+    g = np.zeros((101, 101), dtype=np.float32)
+    g[57:60, 46 + k:49 + k] = 40.0
+    g[49:52, 34 + k:37 + k] = 40.0
+    return make_frame(g, product="reflectivity", valid_time=NOW - timedelta(minutes=2 * (2 - k)))
+
+
+def test_direction_filter_projects_every_cell(tmp_path):
+    radar = HistoryRadar([crosswise_storm(k) for k in range(3)])
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    line = run_cycle(app)
+    assert len(app.notifier.sent) == 1, line
+    msg = app.notifier.sent[0][1]
+    m = re.match(r"Rain expected in about (\d+) min", msg)
+    assert m, msg
+    assert 10 <= int(m.group(1)) <= 25
+
 def test_arriving_now_detail_has_no_zero_eta(tmp_path):
     """Issue #32: when the ETA rounds to 0 the detail must not say 'eta 0 min'."""
     radar = HistoryRadar([moving_storm(k, toward=True, age_min=12.0) for k in range(3)])

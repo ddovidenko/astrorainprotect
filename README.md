@@ -176,10 +176,10 @@ alarms, raise `MIN_CELLS`. During an imaging session where you want a reminder
 that rain is still active, set `REPEAT_MIN=10`. Set `DIRECTION_FILTER=1` to
 estimate storm motion from consecutive reflectivity frames and stop alerting
 on echoes that are moving away from the site; the alert includes an ETA when
-motion is known. The filter projects only the nearest qualifying cell. A broad
-line moving crosswise can be suppressed until a different cell becomes
-nearest, which shortens lead time. Leave the filter off until you have
-replayed recorded storms with it on.
+motion is known. Every qualifying cell is projected, so a broad line moving
+crosswise alerts as soon as any part of it is headed for the site, with the
+ETA of the earliest part. Leave the filter off until you have replayed
+recorded storms with it on.
 
 To tune without waiting for the next storm, record a stretch of radar frames
 during one and replay them through the detector as often as you like, with

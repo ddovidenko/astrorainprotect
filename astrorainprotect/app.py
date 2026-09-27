@@ -120,7 +120,8 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
             # the message says how long from now. will_hit above stays on the raw projection.
             age_min = (now - refl_frames[-1].valid_time).total_seconds() / 60
             eta = max(0.0, (a.eta_min or 0.0) - age_min)
-            detail += f", eta {eta:.0f} min"
+            if eta >= 0.5:  # below that the headline already says "arriving now" (#32)
+                detail += f", eta {eta:.0f} min"
         elif cfg.debug >= 1:
             log.info("DEBUG direction filter: motion unknown, plain radius alerting")
     return Trigger(source="radar", eta_min=eta, detail=detail)

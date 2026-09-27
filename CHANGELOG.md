@@ -40,5 +40,9 @@ Keep a Changelog; versions follow SemVer.
   until a scope came up).
 
 ### Fixed
+- "Rain arriving now" no longer carries a stray `eta 0 min` in the radar detail (#32).
+- `scripts/record_frames.py` flushes each progress line so a redirected log can be tailed live (#30).
+- Docker `HEALTHCHECK` start-period raised from 30 s to 120 s so a slow first cycle does not
+  mark a fresh container unhealthy (#31).
 - `DEBUG=1`/`2` no longer switches on eckit's `PRE-MAIN-DEBUG` startup chatter in the container
   log; the entry point hides the variable while the GRIB libraries load (#13).

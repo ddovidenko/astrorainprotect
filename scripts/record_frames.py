@@ -30,7 +30,7 @@ def record(radar, products: list[str], out_dir: Path, *, minutes: int, interval_
             try:
                 frame = radar.fetch_latest(product, clock())
             except MrmsError as exc:
-                print(f"ERROR {exc}", file=sys.stderr)
+                print(f"ERROR {exc}", file=sys.stderr, flush=True)
                 continue
             if frame is None or frame.filename() in seen:
                 continue
@@ -38,7 +38,7 @@ def record(radar, products: list[str], out_dir: Path, *, minutes: int, interval_
             seen.add(frame.filename())
             written += 1
             print(f"saved {frame.filename()} max={frame.values.max():.1f} "
-                  f"missing={frame.missing_fraction:.0%}")
+                  f"missing={frame.missing_fraction:.0%}", flush=True)
         sleep(interval_sec)
     return written
 
@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     radar = RadarSource(httpx.Client(), lat, lon)
     n = record(radar, args.products.split(","), args.out_dir, minutes=args.minutes,
                interval_sec=args.interval, clock=lambda: datetime.now(UTC), sleep=time.sleep)
-    print(f"wrote {n} frames to {args.out_dir}")
+    print(f"wrote {n} frames to {args.out_dir}", flush=True)
     return 0
 
 

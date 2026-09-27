@@ -14,7 +14,7 @@ services:
       - NTFY_URL=${NTFY_URL}
       - NTFY_TOKEN=${NTFY_TOKEN:-}
       - NTFY_PRIORITY=${NTFY_PRIORITY:-high}
-      - DEBUG=${DEBUG:-0}
+      - ASTRORAINPROTECT_DEBUG=${DEBUG:-0}   # stack variable stays DEBUG; the container must not see that name (#25)
       - POLL_SEC=${POLL_SEC:-180}
       - ALERT_RADIUS_KM=${ALERT_RADIUS_KM:-20}
       - NOW_RADIUS_KM=${NOW_RADIUS_KM:-1}

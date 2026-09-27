@@ -31,7 +31,8 @@ server, also set `NTFY_TOKEN`.
 3. In the stack's Environment variables section, set `LAT`, `LON`, `NTFY_URL`,
    and optionally `NTFY_TOKEN`. Everything else has a working default (see
    Configuration). Set `DEBUG=2` for the first deploy so you get a test
-   notification proving the ntfy path works, then drop it to `1` or `0`.
+   notification proving the ntfy path works, then drop it to `1` or `0`. (The
+   stack file passes it to the container as `ASTRORAINPROTECT_DEBUG`.)
 4. Deploy.
 
 **Plain Docker Compose**
@@ -57,7 +58,7 @@ Legacy names preserved; new vars marked.
 | `NTFY_URL` | required | server + topic |
 | `NTFY_TOKEN` | empty | bearer token for protected topics |
 | `NTFY_PRIORITY` (new) | `high` | ntfy priority header |
-| `DEBUG` | 0 | 0/1/2 |
+| `ASTRORAINPROTECT_DEBUG` | 0 | 0/1/2; the stack file maps the Portainer variable `DEBUG` to it |
 | `POLL_SEC` | 180 | radar poll interval |
 | `ALERT_RADIUS_KM` | 20 | radius for "nearby" |
 | `NOW_RADIUS_KM` | 1 | radius for "raining now" |
@@ -118,9 +119,11 @@ script):
   those hosts are online (for example a smart telescope's JSON-RPC port). If none are, the latch is
   cleared and the cycle skips radar/Pirate Weather checks entirely for that
   poll — nothing outside is at risk to protect.
-- **DEBUG levels**: `DEBUG=0` is silent apart from normal INFO logging.
-  `DEBUG=1` adds extra detail lines (which scope hosts are online, the Pirate
-  Weather summary). `DEBUG=2` additionally sends a one-time test notification
+- **DEBUG levels** (`ASTRORAINPROTECT_DEBUG`; a bare `DEBUG` in the
+  container is ignored with a startup warning because the GRIB library treats
+  that name as its own switch): `0` is silent apart from normal INFO logging.
+  `1` adds extra detail lines (which scope hosts are online, the Pirate
+  Weather summary). `2` additionally sends a one-time test notification
   on every container start, so you can confirm the ntfy path works without
   waiting for rain. The test is sent before the scope gate and says what the
   gate will do: "Scopes online: ...", "No scope online (...); waiting for one

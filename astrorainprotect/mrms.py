@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import gzip
-import os
 import re
 import xml.etree.ElementTree as ET
 import zlib
@@ -12,20 +11,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import eccodes
 import httpx
 import numpy as np
 
-# eckit (loaded with eccodes) treats a generic DEBUG environment variable as its own switch and
-# prints a dozen "PRE-MAIN-DEBUG" lines to stdout. Hide ours while the library loads; it reads
-# the variable only at load time, so restoring it afterwards is safe.
-_debug = os.environ.pop("DEBUG", None)
-import eccodes  # noqa: E402
-
-if _debug is not None:
-    os.environ["DEBUG"] = _debug
-del _debug
-
-from astrorainprotect.frame import Frame  # noqa: E402
+from astrorainprotect.frame import Frame
 
 BUCKET_URL = "https://noaa-mrms-pds.s3.amazonaws.com"
 PRODUCTS = {

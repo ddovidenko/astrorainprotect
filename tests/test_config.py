@@ -1,6 +1,6 @@
 import pytest
 
-from astrorainprotect.config import Config, ConfigError, describe, load_config
+from astrorainprotect.config import Config, ConfigError, describe, ignored_legacy_debug, load_config
 
 BASE = {"LAT": "29.97", "LON": "-95.67", "NTFY_URL": "https://ntfy.example.net/rain"}
 
@@ -31,9 +31,9 @@ def test_defaults():
 
 
 def test_overrides():
-    cfg = load_config({**BASE, "DEBUG": "2", "DIRECTION_FILTER": "1", "POLL_SEC": "120",
-                       "NTFY_TOKEN": "tk_abc", "PW_KEY": "k", "SCOPE_HOSTS": "a,b:1",
-                       "STATE_DIR": "/tmp/s", "NTFY_PRIORITY": "urgent"})
+    cfg = load_config({**BASE, "ASTRORAINPROTECT_DEBUG": "2", "DIRECTION_FILTER": "1",
+                       "POLL_SEC": "120", "NTFY_TOKEN": "tk_abc", "PW_KEY": "k",
+                       "SCOPE_HOSTS": "a,b:1", "STATE_DIR": "/tmp/s", "NTFY_PRIORITY": "urgent"})
     assert cfg.debug == 2
     assert cfg.direction_filter is True
     assert cfg.poll_sec == 120
@@ -52,7 +52,8 @@ def test_required(missing):
 
 
 @pytest.mark.parametrize("key,value", [
-    ("LAT", "abc"), ("LAT", "95"), ("LON", "200"), ("DEBUG", "3"), ("POLL_SEC", "0"),
+    ("LAT", "abc"), ("LAT", "95"), ("LON", "200"), ("ASTRORAINPROTECT_DEBUG", "3"),
+    ("POLL_SEC", "0"),
     ("MIN_CELLS", "0"), ("MIN_PROB", "1.5"), ("LOOKAHEAD_MIN", "0"), ("REPEAT_MIN", "-1"),
     ("NTFY_PRIORITY", "loud"), ("ALERT_RADIUS_KM", "0"),
 ])
@@ -99,3 +100,12 @@ def test_coordinates_outside_mrms_coverage_rejected(lat, lon):
 def test_coordinates_inside_coverage_accepted():
     cfg = load_config({**BASE, "LAT": "47.6", "LON": "-122.3"})   # Seattle
     assert (cfg.lat, cfg.lon) == (47.6, -122.3)
+
+
+def test_legacy_debug_is_ignored_and_warned():
+    """Issue #25: DEBUG belongs to eckit now; only ASTRORAINPROTECT_DEBUG is read."""
+    cfg = load_config({**BASE, "DEBUG": "2"})
+    assert cfg.debug == 0
+    assert "DEBUG" in ignored_legacy_debug({**BASE, "DEBUG": "2"})
+    assert ignored_legacy_debug({**BASE, "DEBUG": "2", "ASTRORAINPROTECT_DEBUG": "1"}) is None
+    assert ignored_legacy_debug(BASE) is None

@@ -97,7 +97,7 @@ def load_config(env: Mapping[str, str]) -> Config:
         ntfy_url=_str(env, "NTFY_URL", None),
         ntfy_token=_str(env, "NTFY_TOKEN"),
         ntfy_priority=priority,
-        debug=_int(env, "DEBUG", 0, 0, 2),
+        debug=_int(env, "ASTRORAINPROTECT_DEBUG", 0, 0, 2),
         poll_sec=_int(env, "POLL_SEC", 180, 30, 3600),
         alert_radius_km=_float(env, "ALERT_RADIUS_KM", 20.0, 0.5, 50.0),
         now_radius_km=_float(env, "NOW_RADIUS_KM", 1.0, 0.1, 10.0),
@@ -117,6 +117,20 @@ def load_config(env: Mapping[str, str]) -> Config:
 
 
 _SECRETS = {"ntfy_token", "pw_key"}
+# Fields whose env var is not simply the upper-cased field name.
+_ENV_NAMES = {"debug": "ASTRORAINPROTECT_DEBUG"}
+
+
+def ignored_legacy_debug(env: Mapping[str, str]) -> str | None:
+    """A warning when the pre-#25 DEBUG variable is set but ASTRORAINPROTECT_DEBUG is not.
+
+    DEBUG is left to eckit (loaded by eccodes), which treats it as its own switch; the app
+    reads ASTRORAINPROTECT_DEBUG only.
+    """
+    if env.get("DEBUG", "").strip() and not env.get("ASTRORAINPROTECT_DEBUG", "").strip():
+        return (f"DEBUG is ignored since it collides with eckit's own switch; set "
+                f"ASTRORAINPROTECT_DEBUG={env['DEBUG'].strip()} instead")
+    return None
 
 
 def describe(cfg: Config) -> str:
@@ -128,5 +142,5 @@ def describe(cfg: Config) -> str:
             value = "***" if value else "(unset)"
         elif isinstance(value, bool):
             value = int(value)
-        parts.append(f"{f.name.upper()}={value}")
+        parts.append(f"{_ENV_NAMES.get(f.name, f.name.upper())}={value}")
     return "\n".join(parts)

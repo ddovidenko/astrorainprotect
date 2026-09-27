@@ -5,6 +5,11 @@ Keep a Changelog; versions follow SemVer.
 
 ## [Unreleased]
 
+### Changed
+- The debug level is read from `ASTRORAINPROTECT_DEBUG`; a bare `DEBUG` is ignored with a startup
+  warning because eckit treats that name as its own switch. The stack file maps the `DEBUG`
+  Portainer variable to the new name, so existing stack variables carry over unchanged (#25).
+
 ### Added
 - `DIRECTION_FILTER=1` projects every qualifying cell, not only the nearest: a crosswise line
   alerts as soon as any part of it is headed for the site, ETA is the earliest entry (#11).

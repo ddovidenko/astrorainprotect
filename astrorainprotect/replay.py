@@ -17,8 +17,10 @@ log = logging.getLogger("astrorainprotect")
 
 
 class DryRunNotifier:
-    def send(self, title: str, message: str, priority: str | None = None) -> bool:
-        log.info("WOULD SEND %s: %s", title, message)
+    def send(self, title: str, message: str, priority: str | None = None,
+             attachment: tuple[bytes, str] | None = None) -> bool:
+        extra = f" [+{attachment[1]}, {len(attachment[0])} bytes]" if attachment else ""
+        log.info("WOULD SEND %s: %s%s", title, message, extra)
         return True
 
 

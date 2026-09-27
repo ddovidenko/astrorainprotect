@@ -11,6 +11,10 @@ Keep a Changelog; versions follow SemVer.
   Portainer variable to the new name, so existing stack variables carry over unchanged (#25).
 
 ### Added
+- Alerts, repeats and the DEBUG=2 test notification carry a radar snapshot PNG as an ntfy
+  attachment: the box around the house, house crosshair, alert and hit-radius rings, motion
+  vector when known. Rendered with numpy alone; `SNAPSHOT=0` disables; any image failure falls
+  back to the text-only send (#16).
 - `DIRECTION_FILTER=1` projects every qualifying cell, not only the nearest: a crosswise line
   alerts as soon as any part of it is headed for the site, ETA is the earliest entry (#11).
 - Scope online/offline announcements: any `SCOPE_HOSTS` host coming or going between polls

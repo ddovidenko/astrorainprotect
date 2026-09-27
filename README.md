@@ -70,6 +70,7 @@ Legacy names preserved; new vars marked.
 | `LOOKAHEAD_MIN` | 60 | projection horizon, also Pirate Weather window |
 | `REPEAT_MIN` | 0 | repeat interval while active |
 | `SCOPE_HOSTS` | empty | scope-online gate |
+| `SNAPSHOT` (new) | 1 | attach a radar snapshot PNG to alerts and the test notification; 0 disables |
 | `PW_KEY` | empty | enables Pirate Weather trigger |
 | `MIN_PROB` | 0.3 | Pirate Weather probability threshold |
 | `REPLAY_DIR` (new) | empty | run detector over saved frames and exit |

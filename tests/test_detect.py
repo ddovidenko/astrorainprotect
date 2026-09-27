@@ -143,3 +143,21 @@ def test_reflectivity_thresholds():
     )
     assert d.product == "reflectivity"
     assert d.nearby and d.qualifying_cells == 9
+
+
+def test_offsets_cover_every_qualifying_cell():
+    """Issue #11: detect() exposes the east/north km offset of every qualifying cell."""
+    g = grid()
+    g[60:63, 40:43] = 1.0              # 9 cells SW of the house
+    g[20:22, 50:52] = 1.0              # 4 cells ~33 km north: outside the alert radius
+    d = detect(make_frame(g), *HOME, **KW)
+    assert d.offsets_km is not None
+    assert d.offsets_km.shape == (9, 2)
+    east, north = d.offsets_km[:, 0], d.offsets_km[:, 1]
+    assert (east < 0).all() and (north < 0).all()          # all SW
+    assert np.hypot(east, north).min() == pytest.approx(d.nearest_km)
+
+
+def test_offsets_none_without_qualifying_cells():
+    d = detect(make_frame(grid()), *HOME, **KW)
+    assert d.offsets_km is None

@@ -85,26 +85,37 @@ def estimate(frames: Sequence[Frame], *, min_confidence: float = MIN_CONFIDENCE)
 
 def project(detection: Detection, motion: Motion, *, hit_radius_km: float,
             lookahead_min: float) -> Approach:
-    if detection.nearest_km is None or detection.nearest_bearing_deg is None:
+    """Project every qualifying cell along the motion vector (#11).
+
+    will_hit when any cell's path enters the hit circle within lookahead_min; eta_min is the
+    earliest entry; closest_km is the smallest closest approach over all cells. Falls back to
+    the nearest cell alone when the detection carries no per-cell offsets.
+    """
+    if detection.offsets_km is not None and len(detection.offsets_km):
+        p = np.asarray(detection.offsets_km, dtype=np.float64).reshape(-1, 2)
+    elif detection.nearest_km is not None and detection.nearest_bearing_deg is not None:
+        b = np.radians(detection.nearest_bearing_deg)
+        p = np.array([[detection.nearest_km * np.sin(b), detection.nearest_km * np.cos(b)]])
+    else:
         return Approach(False, None, float("inf"))
-    b = np.radians(detection.nearest_bearing_deg)
-    px, py = detection.nearest_km * np.sin(b), detection.nearest_km * np.cos(b)   # east, north
+    px, py = p[:, 0], p[:, 1]                                          # east, north
     vx, vy = motion.u_km_per_min, motion.v_km_per_min
-    r0 = float(np.hypot(px, py))
-    if r0 <= hit_radius_km:
-        return Approach(True, 0.0, r0)
+    r0 = np.hypot(px, py)
+    if (r0 <= hit_radius_km).any():
+        return Approach(True, 0.0, float(r0.min()))
     v2 = vx * vx + vy * vy
     if v2 < 1e-9:
-        return Approach(False, None, r0)
-    t_closest = float(np.clip(-(px * vx + py * vy) / v2, 0.0, lookahead_min))
-    closest = float(np.hypot(px + vx * t_closest, py + vy * t_closest))
-    if closest > hit_radius_km:
-        return Approach(False, None, closest)
+        return Approach(False, None, float(r0.min()))
+    pv = px * vx + py * vy
+    t_closest = np.clip(-pv / v2, 0.0, lookahead_min)
+    closest = np.hypot(px + vx * t_closest, py + vy * t_closest)
+    closest_min = float(closest.min())
     # smallest t >= 0 with |p + v t| == hit_radius: solve v2 t^2 + 2(p.v) t + (r0^2 - R^2) = 0
-    bq = 2 * (px * vx + py * vy)
+    bq = 2 * pv
     cq = r0 * r0 - hit_radius_km * hit_radius_km
     disc = bq * bq - 4 * v2 * cq
-    t_enter = (-bq - np.sqrt(max(disc, 0.0))) / (2 * v2)
-    if t_enter < 0 or t_enter > lookahead_min:
-        return Approach(False, None, closest)
-    return Approach(True, float(t_enter), closest)
+    t_enter = (-bq - np.sqrt(np.maximum(disc, 0.0))) / (2 * v2)
+    entering = (closest <= hit_radius_km) & (t_enter >= 0) & (t_enter <= lookahead_min)
+    if not entering.any():
+        return Approach(False, None, closest_min)
+    return Approach(True, float(t_enter[entering].min()), closest_min)

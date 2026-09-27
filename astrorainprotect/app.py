@@ -104,10 +104,16 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
         refl_frames = app.radar.frames("reflectivity") if refl is not None else []
         m = estimate(refl_frames) if refl is not None else None
         if refl is not None and m is not None:
-            nearest_hit = min(hits, key=lambda d: d.nearest_km)
-            a = project(nearest_hit, m,
-                        hit_radius_km=max(cfg.now_radius_km, cfg.alert_radius_km / 4),
-                        lookahead_min=cfg.lookahead_min)
+            # Project every qualifying cell of every product; any one entering the circle is
+            # enough, and the ETA is the earliest entry (#11).
+            hit_radius = max(cfg.now_radius_km, cfg.alert_radius_km / 4)
+            approaches = [project(d, m, hit_radius_km=hit_radius, lookahead_min=cfg.lookahead_min)
+                          for d in hits]
+            hitting = [a for a in approaches if a.will_hit]
+            if hitting:
+                a = min(hitting, key=lambda a: a.eta_min or 0.0)
+            else:
+                a = min(approaches, key=lambda a: a.closest_km)
             if not a.will_hit:
                 log.info(
                     "radar echo moving away (closest approach %.1f km, motion %.1f/%.1f "

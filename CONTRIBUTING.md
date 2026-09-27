@@ -12,10 +12,10 @@ cp .env.example .env && docker compose up --build
 
 The container targets Python 3.12 (`python:3.12-slim`); the local venv may be
 newer. Runtime dependencies are deliberately just `numpy`, `eccodes` and
-`httpx`. `eccodes` is pinned to 2.39.2 on CPython 3.13 and older because that
+`httpx`. `eccodes` is pinned to 2.39.2 on x86_64 CPython 3.13 and older because that
 wheel bundles an eckit-free library (the image is 324 MB with it versus 506 MB
-with newer wheels); on Python 3.14 the newer binding is used since no such
-wheel exists there. Both decode the MRMS files identically; the integration
+with newer wheels); Python 3.14 and aarch64 use the newer binding since no
+such wheel exists for them. Both decode the MRMS files identically; the integration
 test exercises whichever is installed.
 
 ## Layout

@@ -21,8 +21,8 @@ Keep a Changelog; versions follow SemVer.
 - scripts/record_frames.py and REPLAY_DIR for tuning against recorded frames.
 
 ### Changed
-- Container image shrinks from 506 MB to 324 MB by pinning `eccodes==2.39.2` on CPython <= 3.13,
-  the last wheel whose bundled libeccodes does not link eckit; Python 3.14 environments keep the
+- Container image shrinks from 506 MB to 324 MB by pinning `eccodes==2.39.2` on x86_64 CPython <= 3.13,
+  the last wheel whose bundled libeccodes does not link eckit; Python 3.14 and aarch64 keep the
   newer binding because no eckit-free wheel exists for them (#12).
 - Startup fails fast with a clear message when STATE_DIR is not writable, instead of
   discovering it on the first alert (#14).

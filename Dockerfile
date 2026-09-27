@@ -13,6 +13,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
 COPY --from=build /install /usr/local
 USER app
 VOLUME ["/state"]
-HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=60s --timeout=5s --start-period=120s --retries=3 \
   CMD ["python", "-m", "astrorainprotect.healthcheck"]
 CMD ["python", "-m", "astrorainprotect"]

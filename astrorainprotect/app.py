@@ -219,8 +219,8 @@ def _snapshot(app: App, *, fetch: bool = False) -> tuple[bytes, str] | None:
             if frames and frames[-1] is not None:
                 frame = frames[-1]
                 break
-        if frame is None:
-            return None
+        if frame is None or not radar_status(frame, app.clock()).available:
+            return None                   # a stale frame would misrepresent "now"
         cfg = app.cfg
         png = render(frame, cfg.lat, cfg.lon, alert_radius_km=cfg.alert_radius_km,
                      hit_radius_km=max(cfg.now_radius_km, cfg.alert_radius_km / 4),

@@ -746,3 +746,14 @@ def test_test_notification_without_radar_is_text_only(tmp_path):
     run_cycle(app)
     assert app.notifier.sent[0][0] == TITLE_TEST
     assert app.notifier.attachments[0] is None
+
+
+def test_stale_cached_frame_is_not_attached(tmp_path):
+    """A radar outage leaves an old frame cached; a Pirate Weather alert must not show it."""
+    old = make_frame(np.zeros((101, 101)), product="reflectivity",
+                     valid_time=NOW - RADAR_MAX_AGE - timedelta(minutes=1))
+    app = build(tmp_path, radar=FakeRadar(None, old))
+    app.pirate = type("P", (), {"check": lambda self, now: pw(15)})()
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    assert app.notifier.attachments == [None]

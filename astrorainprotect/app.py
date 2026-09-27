@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 
 from astrorainprotect.alarm import HOUSE, Action, AlarmInputs, Trigger, decide
-from astrorainprotect.config import Config, ConfigError, describe, load_config
+from astrorainprotect.config import Config, ConfigError, describe, ignored_legacy_debug, load_config
 from astrorainprotect.detect import Detection, detect
 from astrorainprotect.frame import Frame
 from astrorainprotect.motion import estimate, project
@@ -380,6 +380,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     _setup_logging(cfg.debug)
     log.info("astrorainprotect starting\n%s", describe(cfg))
+    if (legacy := ignored_legacy_debug(os.environ)) is not None:
+        log.warning(legacy)
     if cfg.replay_dir:
         from astrorainprotect.replay import run_replay
         run_replay(cfg, cfg.replay_dir)

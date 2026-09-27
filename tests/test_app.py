@@ -233,7 +233,7 @@ def test_scope_online_runs_checks(tmp_path):
 
 
 def test_debug2_sends_one_test_notification(tmp_path):
-    app = build(tmp_path, env={"DEBUG": "2"})
+    app = build(tmp_path, env={"ASTRORAINPROTECT_DEBUG": "2"})
     run_cycle(app)
     run_cycle(app)
     assert [t for t, _ in app.notifier.sent] == ["Rain alert test"]
@@ -241,8 +241,8 @@ def test_debug2_sends_one_test_notification(tmp_path):
 
 def test_debug2_test_send_runs_even_when_scope_offline(tmp_path):
     radar = FakeRadar(empty("preciprate"), storm("reflectivity", 40.0))
-    app = build(tmp_path, env={"DEBUG": "2", "SCOPE_HOSTS": "10.0.0.5,10.0.0.6"}, radar=radar,
-                scope=lambda: [])
+    app = build(tmp_path, env={"ASTRORAINPROTECT_DEBUG": "2", "SCOPE_HOSTS": "10.0.0.5,10.0.0.6"},
+                radar=radar, scope=lambda: [])
     app.state.set_latch(NOW.timestamp())
     run_cycle(app)
     assert [t for t, _ in app.notifier.sent] == ["Rain alert test"]
@@ -252,19 +252,20 @@ def test_debug2_test_send_runs_even_when_scope_offline(tmp_path):
 
 
 def test_debug2_test_message_names_online_scopes(tmp_path):
-    app = build(tmp_path, env={"DEBUG": "2", "SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: ["10.0.0.5"])
+    app = build(tmp_path, env={"ASTRORAINPROTECT_DEBUG": "2", "SCOPE_HOSTS": "10.0.0.5"},
+                scope=lambda: ["10.0.0.5"])
     run_cycle(app)
     assert "Scopes online: 10.0.0.5" in app.notifier.sent[0][1]
 
 
 def test_debug2_test_message_without_scope_gate(tmp_path):
-    app = build(tmp_path, env={"DEBUG": "2"})
+    app = build(tmp_path, env={"ASTRORAINPROTECT_DEBUG": "2"})
     run_cycle(app)
     assert "Scope gate disabled" in app.notifier.sent[0][1]
 
 
 def test_debug2_test_marker_cleared_by_main_start(tmp_path):
-    app = build(tmp_path, env={"DEBUG": "2"})
+    app = build(tmp_path, env={"ASTRORAINPROTECT_DEBUG": "2"})
     app.state.mark_test_sent()
     app.state.clear_test_marker()
     run_cycle(app)
@@ -508,17 +509,29 @@ def test_direction_filter_note_names_reflectivity(tmp_path):
     assert "note=reflectivity moving away" in line and "outcome=send" in line
 
 
-def test_module_entry_hides_debug_from_eckit(tmp_path):
-    """Issue #13: DEBUG=1/2 must not switch on eckit's PRE-MAIN-DEBUG chatter (it reads DEBUG)."""
+def test_module_entry_does_not_read_debug(tmp_path):
+    """Issue #25: DEBUG is eckit's variable now; the app reads ASTRORAINPROTECT_DEBUG only."""
     import subprocess
     import sys as _sys
-    env = {**BASE, "DEBUG": "2", "REPLAY_DIR": str(tmp_path), "STATE_DIR": str(tmp_path / "s"),
-           "PATH": "/usr/bin:/bin"}
+    env = {**BASE, "ASTRORAINPROTECT_DEBUG": "2", "REPLAY_DIR": str(tmp_path),
+           "STATE_DIR": str(tmp_path / "s"), "PATH": "/usr/bin:/bin"}
     out = subprocess.run([_sys.executable, "-m", "astrorainprotect"], env=env, capture_output=True,
                          text=True, timeout=120)
     assert out.returncode == 0, out.stderr
     assert "PRE-MAIN" not in out.stdout + out.stderr
-    assert "DEBUG=2" in out.stdout                      # the app still saw its own DEBUG
+    assert "ASTRORAINPROTECT_DEBUG=2" in out.stdout
+
+
+def test_legacy_debug_warns_at_startup(tmp_path):
+    import subprocess
+    import sys as _sys
+    env = {**BASE, "DEBUG": "1", "REPLAY_DIR": str(tmp_path), "STATE_DIR": str(tmp_path / "s"),
+           "PATH": "/usr/bin:/bin"}
+    out = subprocess.run([_sys.executable, "-m", "astrorainprotect"], env=env, capture_output=True,
+                         text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    assert "DEBUG is ignored" in out.stdout + out.stderr
+    assert "ASTRORAINPROTECT_DEBUG" in out.stdout + out.stderr
 
 
 # --- issue #22: scope online/offline announcements -----------------------------------------

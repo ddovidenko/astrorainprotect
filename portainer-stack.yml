@@ -26,6 +26,7 @@ services:
       - LOOKAHEAD_MIN=${LOOKAHEAD_MIN:-60}
       - REPEAT_MIN=${REPEAT_MIN:-0}
       - SCOPE_HOSTS=${SCOPE_HOSTS:-}
+      - SNAPSHOT=${SNAPSHOT:-1}
       - PW_KEY=${PW_KEY:-}
       - MIN_PROB=${MIN_PROB:-0.3}
     volumes:

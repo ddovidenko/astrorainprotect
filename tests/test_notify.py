@@ -66,3 +66,51 @@ def test_send_priority_override():
 
     make(handler, priority="urgent").send("t", "m", priority="default")
     assert seen["headers"]["priority"] == "default"
+
+
+def test_send_with_attachment_uses_put_and_headers():
+    seen = {}
+
+    def handler(request):
+        seen.update(method=request.method, headers=dict(request.headers), body=request.content)
+        return httpx.Response(200, json={"id": "x"})
+
+    n = make(handler, token="tk_abc")
+    assert n.send("Rain incoming", "12 km SW", attachment=(b"\x89PNG...", "radar.png")) is True
+    assert seen["method"] == "PUT"
+    assert seen["body"] == b"\x89PNG..."
+    assert seen["headers"]["filename"] == "radar.png"
+    assert seen["headers"]["title"] == "Rain incoming"
+    assert seen["headers"]["message"] == "12 km SW"
+    assert seen["headers"]["authorization"] == "Bearer tk_abc"
+    assert seen["headers"]["tags"] == TAGS
+
+
+def test_attachment_failure_falls_back_to_text_post(caplog):
+    caplog.set_level(logging.WARNING)
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.content))
+        if request.method == "PUT":
+            return httpx.Response(400, text="attachments disabled")
+        return httpx.Response(200)
+
+    assert make(handler).send("t", "m", attachment=(b"img", "radar.png")) is True
+    assert [c[0] for c in calls] == ["PUT", "POST"]
+    assert calls[1][1] == b"m"
+    assert "attachment" in caplog.records[0].getMessage()
+
+
+def test_attachment_network_error_falls_back(caplog):
+    caplog.set_level(logging.WARNING)
+    calls = []
+
+    def handler(request):
+        calls.append(request.method)
+        if request.method == "PUT":
+            raise httpx.ConnectError("refused")
+        return httpx.Response(200)
+
+    assert make(handler).send("t", "m", attachment=(b"img", "radar.png")) is True
+    assert calls == ["PUT", "POST"]

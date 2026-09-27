@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
-from astrorainprotect.app import RADAR_MAX_AGE, App, radar_status, run_cycle
+from astrorainprotect.app import RADAR_MAX_AGE, TITLE_TEST, App, radar_status, run_cycle
 from astrorainprotect.config import load_config
 from astrorainprotect.pirate import PirateError, PirateResult
 from astrorainprotect.state import State
@@ -35,11 +35,12 @@ class FakeRadar:
 
 class FakeNotifier:
     def __init__(self, ok=True):
-        self.ok, self.sent, self.priorities = ok, [], []
+        self.ok, self.sent, self.priorities, self.attachments = ok, [], [], []
 
-    def send(self, title, message, priority=None):
+    def send(self, title, message, priority=None, attachment=None):
         self.sent.append((title, message))
         self.priorities.append(priority)
+        self.attachments.append(attachment)
         return self.ok
 
 
@@ -703,3 +704,56 @@ def test_main_state_dir_error_notifies(monkeypatch, capsys, tmp_path):
     finally:
         ro.chmod(0o700)
     assert calls and "STATE_DIR" in calls[0]
+
+
+# --- issue #16: radar snapshot attachment ---------------------------------------------------
+
+def test_alert_carries_radar_snapshot(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    data, name = app.notifier.attachments[0]
+    assert name == "radar.png" and data[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_snapshot_disabled(tmp_path):
+    app = build(tmp_path, env={"SNAPSHOT": "0"},
+                radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert app.notifier.attachments == [None]
+
+
+def test_snapshot_failure_does_not_block_alert(tmp_path, monkeypatch):
+    import astrorainprotect.app as appmod
+    monkeypatch.setattr(appmod, "render", lambda *a, **k: 1 / 0)
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1 and app.notifier.attachments == [None]
+
+
+def test_test_notification_carries_snapshot(tmp_path):
+    app = build(tmp_path, env={"ASTRORAINPROTECT_DEBUG": "2"},
+                radar=FakeRadar(empty("preciprate"), empty("reflectivity")))
+    run_cycle(app)
+    assert app.notifier.sent[0][0] == TITLE_TEST
+    assert app.notifier.attachments[0][1] == "radar.png"
+
+
+def test_test_notification_without_radar_is_text_only(tmp_path):
+    from astrorainprotect.mrms import MrmsError
+    radar = FakeRadar(error=MrmsError("listing failed", kind="listing"))
+    app = build(tmp_path, env={"ASTRORAINPROTECT_DEBUG": "2"}, radar=radar)
+    run_cycle(app)
+    assert app.notifier.sent[0][0] == TITLE_TEST
+    assert app.notifier.attachments[0] is None
+
+
+def test_stale_cached_frame_is_not_attached(tmp_path):
+    """A radar outage leaves an old frame cached; a Pirate Weather alert must not show it."""
+    old = make_frame(np.zeros((101, 101)), product="reflectivity",
+                     valid_time=NOW - RADAR_MAX_AGE - timedelta(minutes=1))
+    app = build(tmp_path, radar=FakeRadar(None, old))
+    app.pirate = type("P", (), {"check": lambda self, now: pw(15)})()
+    run_cycle(app)
+    assert len(app.notifier.sent) == 1
+    assert app.notifier.attachments == [None]

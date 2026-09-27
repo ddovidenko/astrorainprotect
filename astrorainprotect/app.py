@@ -19,11 +19,12 @@ from astrorainprotect.alarm import HOUSE, Action, AlarmInputs, Trigger, decide
 from astrorainprotect.config import Config, ConfigError, describe, ignored_legacy_debug, load_config
 from astrorainprotect.detect import Detection, detect
 from astrorainprotect.frame import Frame
-from astrorainprotect.motion import estimate, project
+from astrorainprotect.motion import Motion, estimate, project
 from astrorainprotect.mrms import MrmsError, RadarSource
 from astrorainprotect.notify import Notifier
 from astrorainprotect.pirate import PirateError, PirateSource
 from astrorainprotect.scope import online_hosts, parse_hosts
+from astrorainprotect.snapshot import render
 from astrorainprotect.state import State
 
 log = logging.getLogger("astrorainprotect")
@@ -62,6 +63,7 @@ class App:
     clock: Callable[[], datetime]
     failures: dict[str, int] | None = None
     last_note: str = ""
+    last_motion: Motion | None = None   # from the latest radar_trigger, for the snapshot
 
     def __post_init__(self) -> None:
         if self.failures is None:
@@ -103,6 +105,7 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
         refl = next((d for d in hits if d.product == "reflectivity"), None)
         refl_frames = app.radar.frames("reflectivity") if refl is not None else []
         m = estimate(refl_frames) if refl is not None else None
+        app.last_motion = m
         if refl is not None and m is not None:
             # Project every qualifying cell of every product; any one entering the circle is
             # enough, and the ETA is the earliest entry (#11).
@@ -203,9 +206,36 @@ def notify_startup_failure(env: Mapping[str, str], reason: str, tmp_dir: Path | 
     return sent
 
 
+def _snapshot(app: App, *, fetch: bool = False) -> tuple[bytes, str] | None:
+    """PNG attachment of the newest cached frame, or None. Never raises: it is decoration."""
+    if not app.cfg.snapshot:
+        return None
+    try:
+        frame = None
+        for product in ("reflectivity", "preciprate"):
+            frames = app.radar.frames(product)
+            if not frames and fetch:
+                frames = [app.radar.fetch_latest(product, app.clock())]
+            if frames and frames[-1] is not None:
+                frame = frames[-1]
+                break
+        if frame is None or not radar_status(frame, app.clock()).available:
+            return None                   # a stale frame would misrepresent "now"
+        cfg = app.cfg
+        png = render(frame, cfg.lat, cfg.lon, alert_radius_km=cfg.alert_radius_km,
+                     hit_radius_km=max(cfg.now_radius_km, cfg.alert_radius_km / 4),
+                     motion=app.last_motion)
+        return png, "radar.png"
+    except Exception as exc:   # noqa: BLE001 - any failure here must not cost the alert
+        log.warning("radar snapshot skipped: %s", exc)
+        return None
+
+
 def _maybe_send_test(app: App, scope_status: str) -> None:
     if app.cfg.debug >= 2 and not app.state.test_sent():
-        if app.notifier.send(TITLE_TEST, f"Test from astrorainprotect. {scope_status}"):
+        # First cycle has nothing cached yet; fetch once so the test proves the image path too.
+        if app.notifier.send(TITLE_TEST, f"Test from astrorainprotect. {scope_status}",
+                             attachment=_snapshot(app, fetch=True)):
             app.state.mark_test_sent()
             log.info("TEST notification sent")
         else:
@@ -219,6 +249,7 @@ def run_cycle(app: App) -> str:
     cfg, now = app.cfg, app.clock()
     ts = now.timestamp()
     app.last_note = ""
+    app.last_motion = None
 
     # The DEBUG=2 test send runs before the scope gate so a restart always announces itself,
     # and says whether it is checking radar or waiting for a scope.
@@ -312,7 +343,7 @@ def run_cycle(app: App) -> str:
 
     outcome = decision.action.name.lower()
     if decision.action in (Action.SEND, Action.REPEAT):
-        if app.notifier.send(decision.title, decision.message):
+        if app.notifier.send(decision.title, decision.message, attachment=_snapshot(app)):
             app.state.set_latch(ts)
             app.failures["ntfy"] = 0
             log.info(

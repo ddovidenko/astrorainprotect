@@ -36,6 +36,8 @@ def probe_hosts(hosts: list[tuple[str, int]], timeout: float = 5.0, retries: int
     pause = sleep if sleep is not None else time.sleep
     result: dict[str, float | None] = {}
     for host, port in hosts:
+        if result.get(host) is not None:
+            continue              # same host listed with another port, already answered
         result[host] = None
         for attempt in range(retries + 1):
             if attempt:

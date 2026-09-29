@@ -800,3 +800,12 @@ def test_debounce_survives_restart(tmp_path):
     again = scoped(tmp_path, lambda: [])               # new process, same state dir
     assert "outcome=scope-offline" not in run_cycle(again)
     assert "outcome=scope-offline" in run_cycle(again)
+
+
+def test_duplicate_host_entries_count_one_miss_per_poll(tmp_path):
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5,10.0.0.5:5555"}, scope=lambda: ["10.0.0.5"])
+    run_cycle(app)
+    app.scope_check = lambda: []
+    assert "outcome=scope-offline" not in run_cycle(app)   # one missed poll, still in grace
+    assert app.scope_misses["10.0.0.5"] == 1
+    assert "outcome=scope-offline" in run_cycle(app)

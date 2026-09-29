@@ -106,3 +106,21 @@ def test_default_timeout_is_five_seconds(monkeypatch):
     monkeypatch.setattr("astrorainprotect.scope.time.sleep", lambda s: None)
     assert online_hosts([("10.0.0.5", 4700)]) == []
     assert seen == [5.0, 5.0]
+
+
+def test_same_host_second_port_does_not_overwrite_an_answer(monkeypatch):
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_connect(addr, timeout):
+        if addr[1] == 4700:
+            return Conn()
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr("astrorainprotect.scope.socket.create_connection", fake_connect)
+    result = probe_hosts([("10.0.0.5", 4700), ("10.0.0.5", 5555)], sleep=lambda s: None)
+    assert result["10.0.0.5"] is not None

@@ -162,7 +162,8 @@ def _debounce_scopes(app: App, answered: list[str]) -> list[str]:
     counted = list(answered)
     for host in answered:
         app.scope_misses[host] = 0
-    for host, _ in parse_hosts(app.cfg.scope_hosts):
+    # De-duplicated: a host listed twice (two ports, or a typo) must count one miss per poll.
+    for host in dict.fromkeys(h for h, _ in parse_hosts(app.cfg.scope_hosts)):
         if host in answered:
             continue
         app.scope_misses[host] = app.scope_misses.get(host, 0) + 1

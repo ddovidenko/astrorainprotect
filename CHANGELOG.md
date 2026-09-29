@@ -6,6 +6,8 @@ Keep a Changelog; versions follow SemVer.
 ## [Unreleased]
 
 ### Changed
+- CLAUDE.md brought in line with the code: configuration table, repository layout, scope
+  probe and debounce, snapshot attachment, all-cell projection, workflow rules (#41).
 - Scope check tolerates a scope that is slow to answer while imaging: connect timeout 2 s -> 5 s
   with one retry, and a host counts as offline (notification, gate, latch reset) only after two
   consecutive missed polls. "Came online" stays immediate. `ASTRORAINPROTECT_DEBUG=1` logs each

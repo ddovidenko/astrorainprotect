@@ -23,7 +23,7 @@ from astrorainprotect.motion import Motion, estimate, project
 from astrorainprotect.mrms import MrmsError, RadarSource
 from astrorainprotect.notify import Notifier
 from astrorainprotect.pirate import PirateError, PirateSource
-from astrorainprotect.scope import online_hosts, parse_hosts
+from astrorainprotect.scope import parse_hosts, probe_hosts
 from astrorainprotect.snapshot import render
 from astrorainprotect.state import State
 
@@ -64,6 +64,8 @@ class App:
     failures: dict[str, int] | None = None
     last_note: str = ""
     last_motion: Motion | None = None   # from the latest radar_trigger, for the snapshot
+    scope_misses: dict[str, int] | None = None   # consecutive missed polls per host
+    scope_seen: set[str] | None = None           # hosts counted online after the last poll
 
     def __post_init__(self) -> None:
         if self.failures is None:
@@ -143,6 +145,33 @@ def _scope_status(cfg: Config, online: list[str] | None) -> str:
     if online:
         return f"Scopes online: {' '.join(online)}"
     return f"No scope online ({cfg.scope_hosts}); waiting for one before checking radar."
+
+
+SCOPE_OFFLINE_POLLS = 2   # consecutive missed polls before a scope counts as offline
+
+
+def _debounce_scopes(app: App, answered: list[str]) -> list[str]:
+    """Hosts counted online: those that answered, plus those that were online and have missed
+    fewer than SCOPE_OFFLINE_POLLS polls in a row. One missed connect from a scope that is busy
+    imaging must neither notify nor close the gate nor clear the latch. A host that was not
+    online before gets no grace. The remembered set survives restarts via the state dir."""
+    if app.scope_misses is None:
+        app.scope_misses = {}
+    if app.scope_seen is None:
+        app.scope_seen = set(app.state.last_scopes() or ())
+    counted = list(answered)
+    for host in answered:
+        app.scope_misses[host] = 0
+    for host, _ in parse_hosts(app.cfg.scope_hosts):
+        if host in answered:
+            continue
+        app.scope_misses[host] = app.scope_misses.get(host, 0) + 1
+        if host in app.scope_seen and app.scope_misses[host] < SCOPE_OFFLINE_POLLS:
+            counted.append(host)
+            log.info("scope %s missed %d poll; still counted online", host,
+                     app.scope_misses[host])
+    app.scope_seen = set(counted)
+    return counted
 
 
 def _announce_scope_changes(app: App, online: list[str]) -> None:
@@ -253,7 +282,7 @@ def run_cycle(app: App) -> str:
 
     # The DEBUG=2 test send runs before the scope gate so a restart always announces itself,
     # and says whether it is checking radar or waiting for a scope.
-    online = app.scope_check() if cfg.scope_hosts else None
+    online = _debounce_scopes(app, app.scope_check()) if cfg.scope_hosts else None
     _maybe_send_test(app, _scope_status(cfg, online))
     if online is not None:
         try:
@@ -389,12 +418,21 @@ def _setup_logging(debug: int) -> None:
 def build_app(cfg: Config) -> App:
     client = httpx.Client(headers={"User-Agent": "astrorainprotect"})
     hosts = parse_hosts(cfg.scope_hosts)
+
+    def scope_check() -> list[str]:
+        probed = probe_hosts(hosts)
+        if cfg.debug >= 1:
+            log.info("DEBUG scope connect: %s", ", ".join(
+                f"{h} no answer" if t is None else f"{h} {t * 1000:.0f} ms"
+                for h, t in probed.items()))
+        return [h for h, t in probed.items() if t is not None]
+
     return App(
         cfg=cfg,
         radar=RadarSource(client, cfg.lat, cfg.lon),
         notifier=Notifier(client, cfg.ntfy_url, cfg.ntfy_token, cfg.ntfy_priority),
         state=State(cfg.state_dir),
-        scope_check=lambda: online_hosts(hosts),
+        scope_check=scope_check,
         pirate=(PirateSource(client, cfg.pw_key, cfg.lat, cfg.lon, lookahead_min=cfg.lookahead_min,
                              min_prob=cfg.min_prob, min_intensity=cfg.min_intensity,
                              raining_now=cfg.raining_now) if cfg.pw_key else None),

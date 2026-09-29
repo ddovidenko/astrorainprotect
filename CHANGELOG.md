@@ -6,6 +6,8 @@ Keep a Changelog; versions follow SemVer.
 ## [Unreleased]
 
 ### Changed
+- Project brief and design spec describe the site generically; CONTRIBUTING asks the same of
+  future docs, commits, issues and pull requests.
 - CONTRIBUTING.md gains sections on private data that must never be committed and on commit
   and pull request practice; the tuning guide states why recordings stay local.
 - CLAUDE.md brought in line with the code: configuration table, repository layout, scope

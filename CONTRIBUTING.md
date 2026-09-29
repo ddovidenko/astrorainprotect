@@ -42,6 +42,10 @@ site or grant access, and none of them belongs in a commit:
 - **`.env`**: coordinates, the ntfy topic and token, the Pirate Weather key.
 - **`state/`**: the local state directory.
 
+Docs, comments, commit messages, issues and pull requests describe the site
+generically ("the house", "the site"); do not name a town or region. The alarm
+works anywhere in MRMS coverage and nothing in it is location-specific.
+
 Test fixtures use a deliberately approximate location. If a real frame is
 ever wanted as a fixture, re-centre its coordinates first.
 

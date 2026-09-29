@@ -220,3 +220,4 @@ __marimo__/
 .env
 state/
 frames/
+frames-*/

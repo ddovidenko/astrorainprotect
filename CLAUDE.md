@@ -93,11 +93,13 @@ Given the subset grid and its lat/lon coordinates:
 4. **Approach filter (optional, `DIRECTION_FILTER=1`)**: compare the qualifying
    echoes in the current frame with the same echoes 2–3 frames earlier (e.g.
    via centroid displacement, or a coarse cross-correlation of the box). Derive
-   a motion vector; project the nearest echo forward; alert only if its
-   projected path passes within `ALERT_RADIUS_KM` in the next
-   `LOOKAHEAD_MIN` minutes. If motion cannot be estimated (new cell, too few
-   frames), fall back to plain radius alerting — never suppress an alert
-   because the filter lacks data.
+   a motion vector; project every qualifying cell forward (#11); alert only if
+   any cell's path enters the hit radius (`max(NOW_RADIUS_KM,
+   ALERT_RADIUS_KM / 4)`) in the next `LOOKAHEAD_MIN` minutes, with the ETA of
+   the earliest one. Motion comes from whole-box phase correlation of
+   reflectivity frames; shifts under 2 cells count as unknown motion. If
+   motion cannot be estimated (new cell, too few frames), fall back to plain
+   radius alerting — never suppress an alert because the filter lacks data.
 5. Report an ETA (minutes) when motion is known; otherwise report distance and
    bearing ("rain 12 km to the SW").
 
@@ -119,11 +121,29 @@ tested:
   latch file's mtime as the timer.
 - `SCOPE_HOSTS`: comma-separated `host[:port]` (default port 4700, the Seestar
   JSON-RPC port). If set, skip all checks (and API/S3 fetches) unless at least
-  one host answers a TCP connect. Reset the latch when none is online so each
+  one host counts as online. Reset the latch when none is online so each
   observing session starts clean. Log "no scope online".
-- `DEBUG=0|1|2`: 1 adds detail lines; 2 additionally sends one test
+  - Probe: TCP connect, 5 s timeout, one retry after 1 s. A Seestar imaging
+    outdoors on Wi-Fi power save can miss a short connect while the iOS app
+    (persistent connection) still works.
+  - Debounce: a host counts as offline only after two consecutive missed polls.
+    One miss neither notifies, nor closes the gate, nor clears the latch. A host
+    that was not online before gets no grace.
+  - Any host coming or going sends a default-priority notification (#22); the
+    last known set persists in the state dir so restarts do not re-announce.
+- Debug level `0|1|2` (env `ASTRORAINPROTECT_DEBUG`): 1 adds detail lines,
+  including each scope's connect time; 2 additionally sends one test
   notification per container start (marker in `/tmp`, cleared on start) through
-  the *same* notify code path as real alerts.
+  the *same* notify code path as real alerts. The test send runs before the
+  scope gate and reports the gate state.
+- Radar snapshot (#16): alerts, repeats and the test notification attach a
+  small PNG of the box (reflectivity, house crosshair, alert and hit-radius
+  rings, motion vector when known), rendered with numpy only. Sent as an ntfy
+  PUT with the text in headers; any failure falls back to the plain text POST,
+  so an image problem never costs an alert. Stale frames are never attached.
+  `SNAPSHOT=0` disables.
+- Fatal startup errors (bad config, unwritable state dir) send one
+  high-priority "failed to start" notification per container lifetime (#26).
 - ntfy: POST plain text to `NTFY_URL` (server + topic), headers `Title`,
   `Priority: high`, `Tags: loud_sound,bell`, and `Authorization: Bearer
   $NTFY_TOKEN` only when the token is non-empty. Log ntfy's HTTP status and
@@ -144,18 +164,24 @@ variables carry over.
 | `LAT`, `LON` | required | house coordinates |
 | `NTFY_URL` | required | e.g. `https://ntfy.example.net/rain` |
 | `NTFY_TOKEN` | empty | `tk_...` for protected topics |
-| `DEBUG` | 0 | 0/1/2 as above |
+| `ASTRORAINPROTECT_DEBUG` | 0 | 0/1/2 as above; the stack file maps the Portainer variable `DEBUG` to it |
+| `NTFY_PRIORITY` | high | ntfy priority for rain alerts |
 | `POLL_SEC` | 180 | radar poll interval |
 | `ALERT_RADIUS_KM` | 20 | alert if qualifying echoes inside this |
-| `MIN_INTENSITY` | 0.2 | mm/h for a cell to count |
+| `NOW_RADIUS_KM` | 1 | radius for "raining at the house" |
+| `MIN_INTENSITY` | 0.2 | mm/h for a PrecipRate cell to count |
+| `MIN_DBZ` | 30 | dBZ for a reflectivity cell to count |
 | `MIN_CELLS` | 3 | qualifying cells needed |
 | `RAINING_NOW` | 0.05 | mm/h at the house = already raining |
 | `DIRECTION_FILTER` | 0 | 1 = ignore echoes moving away |
 | `LOOKAHEAD_MIN` | 60 | horizon for approach projection and Pirate Weather |
 | `REPEAT_MIN` | 0 | repeat interval while active |
 | `SCOPE_HOSTS` | empty | scope-online gate |
+| `SNAPSHOT` | 1 | attach a radar snapshot PNG to alerts |
 | `PW_KEY` | empty | enables Pirate Weather secondary trigger |
 | `MIN_PROB` | 0.3 | Pirate Weather probability threshold |
+| `REPLAY_DIR` | empty | run the detector over saved frames and exit (local tuning only) |
+| `STATE_DIR` | /state | latch/heartbeat directory; fixed by the image in production |
 | `TZ` | America/Chicago | for log timestamps |
 
 ## Repository layout
@@ -168,17 +194,25 @@ variables carry over.
 ├── docker-compose.yml        for local dev (build: .)
 ├── portainer-stack.yml       image: ghcr.io/ddovidenko/astrorainprotect:latest, no build
 ├── astrorainprotect/
-│   ├── __main__.py           poll loop
+│   ├── __main__.py           entry point
+│   ├── app.py                poll loop, cycle wiring, scope debounce, startup
+│   ├── alarm.py              decide(): latch/repeat/re-arm and message text (pure)
 │   ├── config.py             env parsing + validation, printed at startup
-│   ├── mrms.py               S3 listing/download/decode/subset
-│   ├── detect.py             radius + motion logic (pure functions, no I/O)
+│   ├── mrms.py               S3 listing/download/decode/subset, frame cache
+│   ├── frame.py              Frame dataclass, .npz save/load
+│   ├── detect.py             radius detection (pure functions, no I/O)
+│   ├── motion.py             phase-correlation motion + all-cell projection (pure)
+│   ├── snapshot.py           radar PNG renderer, numpy + zlib (pure)
+│   ├── scope.py              Seestar reachability probe
 │   ├── pirate.py             Pirate Weather secondary trigger
-│   ├── notify.py             ntfy client
-│   └── state.py              latch/repeat/test-marker handling
-├── tests/
-│   ├── fixtures/             small subset .npz frames recorded from real MRMS
-│   └── test_detect.py        radius, MIN_CELLS, motion vector, ETA cases
-├── scripts/record_frames.py  grab N minutes of MRMS subsets for fixtures/replay
+│   ├── notify.py             ntfy client, attachment PUT with text fallback
+│   ├── state.py              latch/repeat/test-marker/scope-set/heartbeat files
+│   ├── replay.py             REPLAY_DIR mode, dry-run notifier
+│   └── healthcheck.py        Docker HEALTHCHECK: heartbeat staleness
+├── tests/                    one test_<module>.py per module, plus test_smoke.py
+│   └── fixtures/             S3 listing and Pirate Weather samples
+├── docs/tuning.md            record -> replay -> compare workflow
+├── scripts/record_frames.py  grab N minutes of MRMS subsets for replay
 ├── legacy/                   the working shell version, kept for reference
 └── .github/workflows/ci.yml  pytest + docker build + push to GHCR on main
 ```
@@ -199,6 +233,12 @@ variables carry over.
   and a `/opt/astrorainprotect/state:/state` volume. Deployed as a Portainer
   Git stack pointing at this repo, with auto-update on push if convenient.
 - Commit small; conventional commit messages; keep a CHANGELOG.
+- Stage files by path and read `git status --short` before every commit; never
+  `git add -A`. Recorded frames (`frames/`, `frames-*/`) are a box centred on
+  the house and must never be committed; the repo is public.
+- `main` is protected by a ruleset (PR required, no force-push, linear
+  history). Open each PR against `main`; do not stack PRs, because GitHub
+  closes a stacked PR when its base branch is deleted by a squash merge.
 - Design spec: docs/superpowers/specs/2026-09-23-astrorainprotect-design.md
 - Never merge a branch or PR without asking the user first.
 
@@ -214,10 +254,16 @@ variables carry over.
 - Pirate Weather free tier has a monthly call cap; polling every 5 minutes fits.
   Do not poll it faster.
 - MRMS timestamps are UTC; log in local time but keep the frame timestamp UTC.
+- eckit (loaded by eccodes) treats a bare `DEBUG` environment variable as its
+  own switch and floods stdout. The container must never see `DEBUG`; hence
+  `ASTRORAINPROTECT_DEBUG`.
+- Grid cells are not square in km (about 0.96 km east-west by 1.11 km
+  north-south at this latitude); anything drawn or measured in pixels must
+  scale the two axes separately.
 
 ## Future ideas (not now)
 
 - Query Seestar imaging state via seestar_alp / seestarpy instead of a TCP
   reachability check (new firmware requires an extracted PEM for auth).
-- Post a small radar snapshot image as an ntfy attachment.
+- Per-product motion estimation, or reflectivity-only projection (#40).
 - Second topic with quieter daytime thresholds.

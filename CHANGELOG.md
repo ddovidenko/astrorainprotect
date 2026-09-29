@@ -6,6 +6,10 @@ Keep a Changelog; versions follow SemVer.
 ## [Unreleased]
 
 ### Changed
+- Scope check tolerates a scope that is slow to answer while imaging: connect timeout 2 s -> 5 s
+  with one retry, and a host counts as offline (notification, gate, latch reset) only after two
+  consecutive missed polls. "Came online" stays immediate. `ASTRORAINPROTECT_DEBUG=1` logs each
+  host's connect time.
 - The debug level is read from `ASTRORAINPROTECT_DEBUG`; a bare `DEBUG` is ignored with a startup
   warning because eckit treats that name as its own switch. The stack file maps the `DEBUG`
   Portainer variable to the new name, so existing stack variables carry over unchanged (#25).

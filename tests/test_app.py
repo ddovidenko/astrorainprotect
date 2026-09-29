@@ -554,6 +554,8 @@ def test_scope_going_offline_notifies_default_priority(tmp_path):
     run_cycle(app)
     app.scope_check = lambda: ["10.0.0.5"]
     run_cycle(app)
+    assert app.notifier.sent == []                     # one missed poll is a blip
+    run_cycle(app)
     assert app.notifier.sent == [
         ("Scope offline", "10.0.0.6 went offline. Online: 10.0.0.5. Radar checks active.")
     ]
@@ -565,6 +567,7 @@ def test_last_scope_offline_says_checks_paused(tmp_path):
     app = scoped(tmp_path, lambda: ["10.0.0.5"])
     run_cycle(app)
     app.scope_check = lambda: []
+    assert "outcome=scope-offline" not in run_cycle(app)   # first miss: gate stays open
     line = run_cycle(app)
     assert app.notifier.sent == [("Scope offline", "10.0.0.5 went offline. No scope online; "
                                                    "radar checks paused until one returns.")]
@@ -586,8 +589,12 @@ def test_both_directions_in_one_cycle(tmp_path):
     run_cycle(app)
     app.scope_check = lambda: ["10.0.0.6"]
     run_cycle(app)
-    assert app.notifier.sent == [("Scopes changed", "10.0.0.6 came online; 10.0.0.5 went offline. "
-                                                    "Online: 10.0.0.6. Radar checks active.")]
+    assert app.notifier.sent == [
+        ("Scope online", "10.0.0.6 came online. Online: 10.0.0.5, 10.0.0.6. Radar checks active.")
+    ]                                                  # .5 missed one poll: still counted online
+    run_cycle(app)
+    assert app.notifier.sent[1] == (
+        "Scope offline", "10.0.0.5 went offline. Online: 10.0.0.6. Radar checks active.")
 
 
 def test_unchanged_scopes_stay_silent_and_no_gate_means_no_announcements(tmp_path):
@@ -608,7 +615,9 @@ def test_scope_set_is_persisted_and_compared_across_restart(tmp_path):
     run_cycle(same)                                    # same state dir, same scopes: silent
     assert same.notifier.sent == []
     changed = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5,10.0.0.6"}, scope=lambda: [])
-    run_cycle(changed)                                 # changed while we were down: announced
+    run_cycle(changed)                                 # first miss after the restart: a blip
+    assert changed.notifier.sent == []
+    run_cycle(changed)                                 # second miss: announced
     assert [t for t, _ in changed.notifier.sent] == ["Scope offline"]
 
 
@@ -616,6 +625,7 @@ def test_failed_announcement_is_retried_next_poll(tmp_path):
     app = scoped(tmp_path, lambda: ["10.0.0.5"])
     run_cycle(app)
     app.scope_check = lambda: []
+    run_cycle(app)                                     # first miss: nothing to announce yet
     app.notifier.ok = False
     run_cycle(app)
     assert app.state.last_scopes() == {"10.0.0.5"}     # not recorded: the change is still pending
@@ -757,3 +767,45 @@ def test_stale_cached_frame_is_not_attached(tmp_path):
     run_cycle(app)
     assert len(app.notifier.sent) == 1
     assert app.notifier.attachments == [None]
+
+
+# --- scope debounce: one missed poll is a blip, two is offline ------------------------------
+
+def test_single_missed_poll_is_silent_and_keeps_gate_open(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    radar = FakeRadar(empty("preciprate"), storm("reflectivity", 40.0))
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5", "ASTRORAINPROTECT_DEBUG": "1"},
+                radar=radar, scope=lambda: ["10.0.0.5"])
+    run_cycle(app)                                     # alert sent, latch set
+    assert app.state.latched()
+    app.scope_check = lambda: []
+    line = run_cycle(app)
+    assert "outcome=scope-offline" not in line
+    assert app.state.latched()                         # the blip must not clear the latch
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]
+    assert any("10.0.0.5 missed 1 poll" in r.getMessage() for r in caplog.records)
+    app.scope_check = lambda: ["10.0.0.5"]
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]   # and no "came online"
+
+
+def test_never_seen_scope_is_offline_immediately(tmp_path):
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: [])
+    assert "outcome=scope-offline" in run_cycle(app)
+
+
+def test_debounce_survives_restart(tmp_path):
+    app = scoped(tmp_path, lambda: ["10.0.0.5"])
+    run_cycle(app)
+    again = scoped(tmp_path, lambda: [])               # new process, same state dir
+    assert "outcome=scope-offline" not in run_cycle(again)
+    assert "outcome=scope-offline" in run_cycle(again)
+
+
+def test_duplicate_host_entries_count_one_miss_per_poll(tmp_path):
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5,10.0.0.5:5555"}, scope=lambda: ["10.0.0.5"])
+    run_cycle(app)
+    app.scope_check = lambda: []
+    assert "outcome=scope-offline" not in run_cycle(app)   # one missed poll, still in grace
+    assert app.scope_misses["10.0.0.5"] == 1
+    assert "outcome=scope-offline" in run_cycle(app)

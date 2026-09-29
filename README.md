@@ -69,7 +69,7 @@ Legacy names preserved; new vars marked.
 | `DIRECTION_FILTER` | 0 | 1 = ignore echoes moving away |
 | `LOOKAHEAD_MIN` | 60 | projection horizon, also Pirate Weather window |
 | `REPEAT_MIN` | 0 | repeat interval while active |
-| `SCOPE_HOSTS` | empty | scope-online gate |
+| `SCOPE_HOSTS` | empty | scope-online gate; 5 s connect timeout, one retry, offline only after two missed polls |
 | `SNAPSHOT` (new) | 1 | attach a radar snapshot PNG to alerts and the test notification; 0 disables |
 | `PW_KEY` | empty | enables Pirate Weather trigger |
 | `MIN_PROB` | 0.3 | Pirate Weather probability threshold |

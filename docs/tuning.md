@@ -17,8 +17,10 @@ LAT=<lat> LON=<lon> .venv/bin/python scripts/record_frames.py frames/ --minutes 
 
 Each new radar frame (every 2 minutes, both products) is saved as a ~40 KB
 `.npz` file holding just the ±0.5° box around your coordinates. Duplicates are
-skipped, nothing is sent, and the state directory is untouched. `frames/` is
-gitignored; recordings are specific to your location.
+skipped, nothing is sent, and the state directory is untouched. `frames/` and
+`frames-<date>/` are gitignored. Recordings are centred on your coordinates and
+give your location away to within a few hundred metres, so never commit them;
+use a fresh `frames-<date>/` folder per capture.
 
 ## Replay
 

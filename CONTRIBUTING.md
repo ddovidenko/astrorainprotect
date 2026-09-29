@@ -20,13 +20,49 @@ test exercises whichever is installed.
 
 ## Layout
 
-- `astrorainprotect/detect.py`, `motion.py`, `alarm.py` are pure: grids and
-  triggers in, decisions out, no I/O. Most behaviour tests live against these.
+- `astrorainprotect/detect.py`, `motion.py`, `alarm.py`, `snapshot.py` are
+  pure: grids and triggers in, decisions or PNG bytes out, no I/O. Most
+  behaviour tests live against these.
+- `frame.py` is the radar frame dataclass and its `.npz` save/load.
 - `mrms.py`, `pirate.py`, `notify.py`, `state.py`, `scope.py` wrap S3, HTTP,
   files and sockets.
 - `app.py` wires them into the poll cycle; `replay.py` runs the same cycle over
   recorded frames; `healthcheck.py` is the Docker HEALTHCHECK.
 - `legacy/` is the shell script this replaced, kept for reference.
+
+## Private data: what must never be committed
+
+This repository is public. Three things on a working machine identify the
+site or grant access, and none of them belongs in a commit:
+
+- **Recorded radar frames** (`frames/`, `frames-<date>/`). Each `.npz` stores
+  the latitude/longitude grid of a box centred on the recording site, so the
+  box centre gives the location to within a few hundred metres. Both folder
+  patterns are gitignored. Record into a folder matching one of them.
+- **`.env`**: coordinates, the ntfy topic and token, the Pirate Weather key.
+- **`state/`**: the local state directory.
+
+Test fixtures use a deliberately approximate location. If a real frame is
+ever wanted as a fixture, re-centre its coordinates first.
+
+If something private does get pushed, removing it in a later commit is not
+enough: it stays in history and in the pull request's refs. Rewrite the branch,
+then ask GitHub Support to purge the dangling commits and PR refs.
+
+## Commits and pull requests
+
+- Stage files by path (`git add path/to/file`) and read `git status --short`
+  before committing. Do not use `git add -A` or `git add .`; that is how a
+  capture folder reached `main` once.
+- Before asking for a merge, check the pull request's file list. A change
+  that should touch six files and shows three hundred is the warning sign.
+- Open every pull request against `main`. Do not stack one PR on another
+  PR's branch: squash-merging the first deletes its branch, and GitHub then
+  closes the stacked PR, which cannot be retargeted afterwards.
+- `main` is protected by a ruleset: changes arrive through pull requests,
+  history is linear, force-pushes and deletion are blocked.
+- A change to behaviour gets an independent review before merge; it has
+  caught a real defect more often than not.
 
 ## Design documents
 
@@ -39,7 +75,9 @@ test exercises whichever is installed.
 
 Every pull request runs ruff, the unit tests and a Docker build. A push to
 `main` additionally publishes `ghcr.io/ddovidenko/astrorainprotect:latest` and
-a `:<git-sha>` tag. The repository allows squash merges only. The GHCR package
+a `:<git-sha>` tag. The repository allows squash merges only. The image is
+built from `pyproject.toml`, `README.md`, `LICENSE` and the `astrorainprotect/`
+package alone, so nothing else in the working tree can end up in it. The GHCR package
 must be public (GitHub package settings) for Portainer to pull without
 credentials.
 

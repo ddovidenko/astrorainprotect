@@ -6,6 +6,8 @@ Keep a Changelog; versions follow SemVer.
 ## [Unreleased]
 
 ### Changed
+- CONTRIBUTING.md gains sections on private data that must never be committed and on commit
+  and pull request practice; the tuning guide states why recordings stay local.
 - CLAUDE.md brought in line with the code: configuration table, repository layout, scope
   probe and debounce, snapshot attachment, all-cell projection, workflow rules (#41).
 - Scope check tolerates a scope that is slow to answer while imaging: connect timeout 2 s -> 5 s

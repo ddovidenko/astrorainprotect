@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import tempfile
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from astrorainprotect.config import Config
@@ -52,15 +52,26 @@ def run_replay(cfg: Config, replay_dir: Path | str) -> int:
     from astrorainprotect.app import App, run_cycle  # local import avoids a cycle
 
     frames = load_frames(replay_dir)
-    times = sorted({f.valid_time for f in frames})
-    log.info("replay: %d frames, %d distinct times from %s", len(frames), len(times), replay_dir)
-    clock = {"t": times[0] if times else None}
+    log.info("replay: %d frames from %s", len(frames), replay_dir)
+    if not frames:
+        return 0
+    # Step the clock the way the live loop does, so the frame history, repeats and the
+    # direction filter see what they would have seen at POLL_SEC (#50). Set POLL_SEC to the
+    # product cadence (120) to run every frame.
+    step = timedelta(seconds=cfg.poll_sec)
+    t, end = frames[0].valid_time, frames[-1].valid_time
+    clock = {"t": t}
+    cycles = 0
     with tempfile.TemporaryDirectory() as tmp:
         app = App(cfg=cfg, radar=ReplaySource(frames), notifier=DryRunNotifier(),
                   state=State(Path(tmp) / "state", Path(tmp) / "tmp"),
                   scope_check=lambda: ["replay"],   # SCOPE_HOSTS must not gate a replay
                   pirate=None, clock=lambda: clock["t"])
-        for t in times:
+        while t <= end:
             clock["t"] = t
             run_cycle(app)
-    return len(times)
+            cycles += 1
+            t += step
+    log.info("replay: %d cycles, one every %d s, from %s to %s", cycles, cfg.poll_sec,
+             frames[0].valid_time.strftime("%H:%MZ"), end.strftime("%H:%MZ"))
+    return cycles

@@ -21,6 +21,9 @@ Keep a Changelog; versions follow SemVer.
   off by default (#47, #48).
 
 ### Changed
+- Replay (`REPLAY_DIR`) steps the clock by `POLL_SEC` instead of running every frame time, so
+  notification counts match what the live loop would have sent; `POLL_SEC=120` runs every
+  frame (#50).
 - With `DIRECTION_FILTER=1` the summary line says why motion is unknown
   (`note=motion unknown (<reason>)`; the README lists the reasons), and the "moving away"
   note names every product that was dropped (#47).

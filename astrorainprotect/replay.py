@@ -10,7 +10,7 @@ from pathlib import Path
 
 from astrorainprotect.config import Config
 from astrorainprotect.frame import Frame
-from astrorainprotect.mrms import PRODUCTS
+from astrorainprotect.mrms import FRAME_CACHE, PRODUCTS
 from astrorainprotect.state import State
 
 log = logging.getLogger("astrorainprotect")
@@ -30,7 +30,7 @@ def load_frames(directory: Path | str) -> list[Frame]:
 
 
 class ReplaySource:
-    def __init__(self, frames: list[Frame], cache: int = 5) -> None:
+    def __init__(self, frames: list[Frame], cache: int = FRAME_CACHE) -> None:
         self._all = {p: [f for f in frames if f.product == p] for p in PRODUCTS}
         self._hist: dict[str, deque[Frame]] = {p: deque(maxlen=cache) for p in PRODUCTS}
 

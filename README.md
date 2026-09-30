@@ -130,14 +130,18 @@ script):
   gate will do: "Scopes online: ...", "No scope online (...); waiting for one
   before checking radar." or "Scope gate disabled; checking every poll."
 - **Direction filter**: with `DIRECTION_FILTER=1`, storm motion is estimated
-  from the last few reflectivity frames and the nearest qualifying echo is
+  by cross-correlating the echo (>= 20 dBZ) in the newest reflectivity frame
+  with the frame about 20 minutes earlier, and every qualifying echo is
   projected along it. If its projected path does not come within
   `max(NOW_RADIUS_KM, ALERT_RADIUS_KM / 4)` of the site inside `LOOKAHEAD_MIN`,
   the radar trigger is dropped for that cycle (the summary line shows
-  `note=reflectivity moving away`). When it will hit, the alert carries an ETA, counted
-  down by the age of the newest frame. When motion is unknown (too few
-  frames, low confidence, sub-resolution shift), the filter never suppresses:
-  plain radius alerting applies. Rain at the site always alerts.
+  `note=reflectivity moving away`, naming the products that were dropped). When it will hit, the alert carries an ETA, counted
+  down by the age of the newest frame. When motion is unknown, the filter never
+  suppresses: plain radius alerting applies, and the summary line says why:
+  `note=motion unknown (no baseline)` (less than 8 minutes of history, or a
+  gap over 30), `(few cells)` (too little echo in the box), `(corr 0.21)`
+  (the two frames do not match at any shift up to 120 km/h) or
+  `(small shift)` (under 2 grid cells). Rain at the site always alerts.
 
 ## Reading the logs
 
@@ -169,7 +173,8 @@ Each poll cycle ends with one summary line, for example:
   `none`, `send-failed`, or `scope-offline` (no scope answered, so nothing was
   checked; the line then shows `radar=skipped`).
 - `note` — `-` normally, `reflectivity moving away` when the direction filter
-  dropped the radar echo this cycle, or `no scope online (...)` on the
+  dropped the radar echo this cycle, `motion unknown (...)` when it could not
+  estimate motion and alerted on plain radius, or `no scope online (...)` on the
   scope-offline path.
 
 ## Tuning
@@ -178,12 +183,13 @@ Start with the defaults. If alerts feel late, lower `MIN_DBZ` to `25` for
 earlier — but noisier — alerts. If single-pixel radar noise is triggering false
 alarms, raise `MIN_CELLS`. During an imaging session where you want a reminder
 that rain is still active, set `REPEAT_MIN=10`. Set `DIRECTION_FILTER=1` to
-estimate storm motion from consecutive reflectivity frames and stop alerting
+estimate storm motion from reflectivity frames and stop alerting
 on echoes that are moving away from the site; the alert includes an ETA when
 motion is known. Every qualifying cell is projected, so a broad line moving
 crosswise alerts as soon as any part of it is headed for the site, with the
-ETA of the earliest part. Leave the filter off until you have replayed
-recorded storms with it on.
+ETA of the earliest part. Leave the filter off: on the first recorded
+storm it dropped the alert for 40 minutes of a real approach, because new cells
+kept forming on the side facing the site (#48).
 
 To tune without waiting for the next storm, record a stretch of radar frames
 during one and replay them through the detector as often as you like, with

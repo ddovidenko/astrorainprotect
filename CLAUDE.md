@@ -96,10 +96,14 @@ Given the subset grid and its lat/lon coordinates:
    a motion vector; project every qualifying cell forward (#11); alert only if
    any cell's path enters the hit radius (`max(NOW_RADIUS_KM,
    ALERT_RADIUS_KM / 4)`) in the next `LOOKAHEAD_MIN` minutes, with the ETA of
-   the earliest one. Motion comes from whole-box phase correlation of
-   reflectivity frames; shifts under 2 cells count as unknown motion. If
-   motion cannot be estimated (new cell, too few frames), fall back to plain
-   radius alerting — never suppress an alert because the filter lacks data.
+   the earliest one. Motion comes from cross-correlating the >= 20 dBZ echo
+   masks of two reflectivity frames about 20 minutes apart (8 to 30 allowed,
+   chosen by time), whichever product qualified (#47); shifts under 2 cells,
+   correlation under 0.3 or fewer than 30 echo cells count as unknown motion.
+   If motion cannot be estimated (new cell, too little history), fall back to
+   plain radius alerting — never suppress an alert because the filter lacks
+   data. Known weakness: the projection drops alerts during an approach with
+   new cell growth (#48), so the filter stays off.
 5. Report an ETA (minutes) when motion is known; otherwise report distance and
    bearing ("rain 12 km to the SW").
 
@@ -201,7 +205,7 @@ variables carry over.
 │   ├── mrms.py               S3 listing/download/decode/subset, frame cache
 │   ├── frame.py              Frame dataclass, .npz save/load
 │   ├── detect.py             radius detection (pure functions, no I/O)
-│   ├── motion.py             phase-correlation motion + all-cell projection (pure)
+│   ├── motion.py             cross-correlation motion + all-cell projection (pure)
 │   ├── snapshot.py           radar PNG renderer, numpy + zlib (pure)
 │   ├── scope.py              Seestar reachability probe
 │   ├── pirate.py             Pirate Weather secondary trigger
@@ -266,4 +270,5 @@ variables carry over.
 - Query Seestar imaging state via seestar_alp / seestarpy instead of a TCP
   reachability check (new firmware requires an extracted PEM for auth).
 - Per-product motion estimation, or reflectivity-only projection (#40).
+- Direction filter that holds back repeats instead of dropping the alert (#48).
 - Second topic with quieter daytime thresholds.

@@ -5,7 +5,20 @@ Keep a Changelog; versions follow SemVer.
 
 ## [Unreleased]
 
+### Fixed
+- Storm motion is estimated on real storms. Phase correlation never reached its confidence
+  threshold on the first recorded storm (motion unknown on 309 of 309 polls); it is replaced by
+  normalised cross-correlation of the >= 20 dBZ echo masks of two reflectivity frames about
+  20 minutes apart, chosen by time so the result does not depend on `POLL_SEC`. Sparse masks
+  (under 30 cells) and shifts over 120 km/h are rejected. Motion is now estimated whichever
+  product qualified, and the frame cache holds 16 frames per product. On the same recording
+  motion is known on all but 7 of the polls that had an echo in range. `DIRECTION_FILTER` stays
+  off by default (#47, #48).
+
 ### Changed
+- With `DIRECTION_FILTER=1` the summary line says why motion is unknown
+  (`note=motion unknown (no baseline|few cells|corr 0.NN|small shift)`), and the "moving away"
+  note names every product that was dropped (#47).
 - Project brief and design spec describe the site generically; CONTRIBUTING asks the same of
   future docs, commits, issues and pull requests.
 - CONTRIBUTING.md gains sections on private data that must never be committed and on commit

@@ -9,7 +9,7 @@ event; the commands below already work.
 
 Run this on any machine with the project installed (see CONTRIBUTING.md), when
 rain is expected in the next hour or two. Starting early matters: the motion
-estimate needs a few frames of history before a cell arrives.
+estimate needs at least 8 minutes of history, ideally 20, before a cell arrives.
 
 ```bash
 LAT=<lat> LON=<lon> .venv/bin/python scripts/record_frames.py frames/ --minutes 180 --interval 120
@@ -41,8 +41,8 @@ Run the same folder with different settings and note when the first
 
 - `MIN_DBZ` 25 vs 30: earlier alerts versus alerts for cells that never arrive.
 - `MIN_CELLS`, `ALERT_RADIUS_KM`: lead time versus false alarms.
-- `DIRECTION_FILTER=1`: how often the summary shows no ETA (motion unknown,
-  plain alerting used) and whether any cycle shows `note=reflectivity moving away` for a
+- `DIRECTION_FILTER=1`: how often the summary shows `note=motion unknown (...)`
+  (plain alerting used; the reason is in the brackets) and whether any cycle shows `note=reflectivity moving away` for a
   storm that did reach you. That last case is the one to watch for; if it
   happens on your data, keep the filter off.
 

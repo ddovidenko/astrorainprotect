@@ -56,3 +56,14 @@ def test_dry_run_notifier(caplog):
     caplog.set_level(logging.INFO)
     assert DryRunNotifier().send("T", "M") is True
     assert "WOULD SEND T: M" in caplog.records[-1].getMessage()
+
+
+def test_replay_source_keeps_enough_history_for_the_motion_baseline(tmp_path):
+    """#47: motion compares frames up to 30 minutes apart; at the 2-minute cadence that is 16."""
+    frames = [make_frame(np.zeros((101, 101)), product="reflectivity",
+                         valid_time=T0 + timedelta(minutes=2 * k)) for k in range(20)]
+    src = ReplaySource(frames)
+    for f in frames:
+        src.fetch_latest("reflectivity", f.valid_time)
+    kept = src.frames("reflectivity")
+    assert kept[-1].valid_time - kept[0].valid_time == timedelta(minutes=30)

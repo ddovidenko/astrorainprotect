@@ -23,6 +23,7 @@ PRODUCTS = {
     "preciprate": "PrecipRate_00.00",
 }
 MIDNIGHT_GRACE = timedelta(minutes=10)
+FRAME_CACHE = 16  # frames kept per product: 30 minutes at the 2-minute product cadence (#47)
 _S3_NS = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 _KEY_TIME = re.compile(r"_(\d{8})-(\d{6})\.grib2\.gz$")
 
@@ -185,7 +186,7 @@ class RadarSource:
     """Fetches the newest frame per product and keeps a short history for motion estimation."""
 
     def __init__(self, client: httpx.Client, lat: float, lon: float, *,
-                 half_deg: float = 0.5, cache: int = 5) -> None:
+                 half_deg: float = 0.5, cache: int = FRAME_CACHE) -> None:
         self._client = client
         self._lat, self._lon, self._half = lat, lon, half_deg
         self._frames: dict[str, deque[Frame]] = {p: deque(maxlen=cache) for p in PRODUCTS}

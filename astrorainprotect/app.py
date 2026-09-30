@@ -104,11 +104,12 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
     )
     eta: float | None = None
     if cfg.direction_filter:
-        refl = next((d for d in hits if d.product == "reflectivity"), None)
-        refl_frames = app.radar.frames("reflectivity") if refl is not None else []
-        m = estimate(refl_frames) if refl is not None else None
+        # Motion comes from the reflectivity field across the whole box, whichever product
+        # qualified inside the radius (#47).
+        refl_frames = app.radar.frames("reflectivity")
+        m, unknown = estimate(refl_frames)
         app.last_motion = m
-        if refl is not None and m is not None:
+        if m is not None:
             # Project every qualifying cell of every product; any one entering the circle is
             # enough, and the ETA is the earliest entry (#11).
             hit_radius = max(cfg.now_radius_km, cfg.alert_radius_km / 4)
@@ -125,7 +126,7 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
                     "km/min, conf %.2f); not alerting",
                     a.closest_km, m.u_km_per_min, m.v_km_per_min, m.confidence,
                 )
-                app.last_note = "reflectivity moving away"
+                app.last_note = f"{'+'.join(d.product for d in hits)} moving away"
                 return None
             # The projection runs from the frame's valid time; count down the frame's age so
             # the message says how long from now. will_hit above stays on the raw projection.
@@ -133,8 +134,11 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
             eta = max(0.0, (a.eta_min or 0.0) - age_min)
             if eta >= 0.5:  # below that the headline already says "arriving now" (#32)
                 detail += f", eta {eta:.0f} min"
-        elif cfg.debug >= 1:
-            log.info("DEBUG direction filter: motion unknown, plain radius alerting")
+        else:
+            app.last_note = f"motion unknown ({unknown})"
+            if cfg.debug >= 1:
+                log.info("DEBUG direction filter: motion unknown (%s), plain radius alerting",
+                         unknown)
     return Trigger(source="radar", eta_min=eta, detail=detail)
 
 

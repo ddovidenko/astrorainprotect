@@ -43,6 +43,44 @@ def test_xcorr_shift_only_searches_plausible_shifts():
     assert corr < 0.1
 
 
+def test_xcorr_shift_search_window_is_an_ellipse():
+    # (9, 9) is inside the 10 x 10 box but outside the ellipse, so it is not found
+    a = (blob(40, 40) > 0).astype(np.float32)
+    b = np.roll(a, (9, 9), axis=(0, 1))
+    dy, dx, corr = xcorr_shift(a, b, max_dy=10, max_dx=10)
+    assert (dy / 10) ** 2 + (dx / 10) ** 2 <= 1.0
+
+
+def test_xcorr_shift_does_not_wrap_around_the_box():
+    # a cell at the west edge dissipates and an unrelated one sits at the east edge: on a
+    # torus those are 12 columns apart, in the box they are 89 apart
+    a = np.zeros((101, 101), dtype=np.float32)
+    b = np.zeros((101, 101), dtype=np.float32)
+    a[40:60, 0:12] = 1.0
+    b[40:60, 89:101] = 1.0
+    dy, dx, corr = xcorr_shift(a, b, max_dy=20, max_dx=20)
+    assert corr < 0.1
+
+
+def test_xcorr_shift_reports_correlation_at_the_shift_it_returns():
+    # the echo splits and moves both ways: two tied peaks, and their middle matches nothing
+    a = (blob(50, 50) > 0).astype(np.float32)
+    b = np.maximum(np.roll(a, (0, 15), axis=(0, 1)), np.roll(a, (0, -15), axis=(0, 1)))
+    dy, dx, corr = xcorr_shift(a, b, max_dy=20, max_dx=20)
+    assert (dy, dx) == (0, 0)
+    assert corr < 0.1
+
+
+def test_xcorr_shift_tie_centre_outside_the_window_is_finite():
+    a = np.zeros((40, 40), dtype=np.float32)
+    a[20, 10] = 1.0
+    b = np.zeros((40, 40), dtype=np.float32)
+    b[20, 10 + 3] = 1.0
+    b[23, 10] = 1.0                     # ties at (0, 3) and (3, 0); their centre (2, 2) rounds
+    dy, dx, corr = xcorr_shift(a, b, max_dy=3, max_dx=3)     # outside the 3 x 3 ellipse
+    assert np.isfinite(corr)
+
+
 def test_estimate_vector_units_and_sign():
     # blob moves 6 rows south and 8 columns east over 10 minutes
     frames = [refl(np.roll(blob(30, 40), (3 * k, 4 * k), axis=(0, 1)), 5 * k) for k in range(3)]
@@ -103,6 +141,39 @@ def test_estimate_rejects_sparse_echo():
     # 13 cells is too little signal; on the recorded storm such masks gave wild shifts
     frames = [refl(np.roll(blob(30, 40, r=2), (0, 4 * k), axis=(0, 1)), 5 * k) for k in range(3)]
     assert estimate(frames) == (None, "few cells")
+
+
+def rect(cells, col):
+    g = np.zeros((101, 101), dtype=np.float32)
+    g.flat[[r * 101 + col + c for r in range(40, 46) for c in range(5)][:cells]] = 40.0
+    return g
+
+
+def test_estimate_accepts_thirty_cells_and_rejects_twenty_nine():
+    assert estimate([refl(rect(30, 20), 0), refl(rect(30, 26), 10)])[0] is not None
+    assert estimate([refl(rect(29, 20), 0), refl(rect(29, 26), 10)]) == (None, "few cells")
+
+
+@pytest.mark.parametrize("sparse", [0, 1])
+def test_estimate_needs_enough_echo_in_both_frames(sparse):
+    grids = [blob(30, 40), np.roll(blob(30, 40), (0, 6), axis=(0, 1))]
+    grids[sparse] = np.roll(blob(30, 40, r=2), (0, 6 * sparse), axis=(0, 1))
+    assert estimate([refl(grids[0], 0), refl(grids[1], 10)]) == (None, "few cells")
+
+
+def test_estimate_skips_a_baseline_of_another_shape():
+    frames = [refl(blob(30, 40, n=81), 0), refl(np.roll(blob(30, 40), (0, 6), axis=(0, 1)), 10)]
+    assert estimate(frames) == (None, "no baseline")
+
+
+def test_estimate_ignores_echo_appearing_across_the_box_edge():
+    # nothing moves: one cell fades at the west edge, another shows up at the east edge
+    a = np.zeros((101, 101), dtype=np.float32)
+    b = np.zeros((101, 101), dtype=np.float32)
+    a[40:60, 0:12] = 40.0
+    b[40:60, 89:101] = 40.0
+    m, reason = estimate([refl(a, 0), refl(b, 10)])
+    assert m is None and reason.startswith("corr")
 
 
 def test_estimate_rejects_empty_frames():

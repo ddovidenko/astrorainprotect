@@ -11,7 +11,7 @@ import numpy as np
 from astrorainprotect.detect import KM_PER_DEG, Detection
 from astrorainprotect.frame import Frame
 
-MIN_CONFIDENCE = 0.3         # correlation coefficient; the 2026-09-29 storm gave 0.33..0.79 (#47)
+MIN_CONFIDENCE = 0.3         # correlation coefficient; the 2026-09-29 storm gave 0.38..0.75 (#47)
 MIN_SHIFT_CELLS = 2          # below this, a whole-cell shift is not trustworthy
 MASK_DBZ = 20.0              # cells at or above this make up the echo mask that is correlated
 MIN_MASK_CELLS = 30          # sparser masks gave wild shifts with a confident-looking peak
@@ -39,29 +39,32 @@ class Approach:
 
 def xcorr_shift(a: np.ndarray, b: np.ndarray, *, max_dy: float,
                 max_dx: float) -> tuple[int, int, float]:
-    """(dy, dx, corr) such that b ≈ np.roll(a, (dy, dx), axis=(0, 1)), for 0/1 echo masks.
+    """(dy, dx, corr): the shift of 0/1 echo mask a that best overlays it on mask b.
 
-    Normalised cross-correlation, searched only over shifts inside the ellipse max_dy, max_dx.
-    Unlike phase correlation it does not whiten the spectrum, so echoes that grow, decay and
-    deform while they move still correlate (#47).
+    corr is the correlation coefficient of the two masks at that shift, searched only over
+    shifts inside the ellipse max_dy, max_dx. Unlike phase correlation it does not whiten the
+    spectrum, so echoes that grow, decay and deform while they move still correlate (#47).
+    Cells shifted past the box edge are lost, not wrapped to the other side.
     """
-    a0, b0 = a.astype(np.float64), b.astype(np.float64)
-    a0, b0 = a0 - a0.mean(), b0 - b0.mean()
-    norm = math.sqrt(float((a0 * a0).sum()) * float((b0 * b0).sum()))
+    n, m = a.shape
+    na, nb = float(a.sum()), float(b.sum())
+    size = n * m
+    norm = math.sqrt(na * (1 - na / size) * nb * (1 - nb / size))
     if norm == 0.0:
         return 0, 0, 0.0
-    r = np.fft.ifft2(np.fft.fft2(b0) * np.conj(np.fft.fft2(a0))).real
-    n, m = a.shape
-    sy = np.fft.fftfreq(n, 1.0 / n)[:, None]     # signed shift of each row/column of r
-    sx = np.fft.fftfreq(m, 1.0 / m)[None, :]
+    # overlap[s] = cells set in both a shifted by s and b; zero-padded so nothing wraps
+    pad = (2 * n, 2 * m)
+    fa, fb = np.fft.rfft2(a, pad), np.fft.rfft2(b, pad)
+    overlap = np.rint(np.fft.irfft2(fb * np.conj(fa), pad))
+    sy = np.fft.fftfreq(pad[0], 1.0 / pad[0])[:, None]   # signed shift of each row/column
+    sx = np.fft.fftfreq(pad[1], 1.0 / pad[1])[None, :]
     allowed = (sy / max(max_dy, 1.0)) ** 2 + (sx / max(max_dx, 1.0)) ** 2 <= 1.0
-    r = np.where(allowed, r, -np.inf)
-    # Mask overlaps are whole cell counts, so neighbouring shifts often tie (a small echo that
-    # fits anywhere inside the larger one it grew into). Take the middle of the tied shifts,
-    # not whichever argmax meets first, and report the correlation there.
-    tj, ti = np.nonzero(r >= r.max() - 0.5)
+    # Overlaps are whole cell counts, so neighbouring shifts often tie (a small echo that fits
+    # anywhere inside the larger one it grew into). Take the middle of the tied shifts, not
+    # whichever argmax meets first, and report the correlation there.
+    tj, ti = np.nonzero(allowed & (overlap == overlap[allowed].max()))
     dy, dx = round(float(sy[tj, 0].mean())), round(float(sx[0, ti].mean()))
-    return dy, dx, float(r[dy % n, dx % m] / norm)
+    return dy, dx, float((overlap[dy % pad[0], dx % pad[1]] - na * nb / size) / norm)
 
 
 def _baseline(frames: Sequence[Frame]) -> tuple[Frame, float] | None:
@@ -109,7 +112,7 @@ def estimate(frames: Sequence[Frame], *,
     reach_km = MAX_SPEED_KM_PER_MIN * dt_min
     dy, dx, corr = xcorr_shift(a, b, max_dy=reach_km / km_ns, max_dx=reach_km / km_ew)
     if corr < min_confidence:
-        return None, f"corr {corr:.2f}"
+        return None, f"corr {max(corr, 0.0):.2f}"
     if math.hypot(dy, dx) < MIN_SHIFT_CELLS:
         return None, "small shift"
     return Motion(

@@ -1,5 +1,5 @@
 import gzip
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -299,6 +299,18 @@ def test_radar_source_cache_order_and_limit(fake_decode):
     bucket.keys = [K1, K2, K2.replace("120200", "120400")]
     c = src.fetch_latest("preciprate", NOW)
     assert src.frames("preciprate") == [b, c]
+
+
+def test_radar_source_keeps_thirty_minutes_of_frames_by_default(fake_decode):
+    """#47: the motion baseline looks up to 30 minutes back; that is 16 frames at 2 minutes."""
+    keys = [K1.replace("120000", f"12{2 * k:02d}00") for k in range(20)]
+    bucket = FakeBucket([])
+    src = RadarSource(httpx.Client(transport=httpx.MockTransport(bucket)), 29.97, -95.67)
+    for k in range(20):
+        bucket.keys = keys[:k + 1]
+        src.fetch_latest("preciprate", NOW + timedelta(minutes=40))
+    kept = src.frames("preciprate")
+    assert kept[-1].valid_time - kept[0].valid_time == timedelta(minutes=30)
 
 
 def test_radar_source_empty_listing(fake_decode):

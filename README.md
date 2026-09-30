@@ -135,11 +135,13 @@ script):
   projected along it. If its projected path does not come within
   `max(NOW_RADIUS_KM, ALERT_RADIUS_KM / 4)` of the site inside `LOOKAHEAD_MIN`,
   the radar trigger is dropped for that cycle (the summary line shows
-  `note=reflectivity moving away`, naming the products that were dropped). When it will hit, the alert carries an ETA, counted
+  `note=... moving away`, naming the products that were dropped:
+  `reflectivity`, `preciprate` or `reflectivity+preciprate`). When it will hit, the alert carries an ETA, counted
   down by the age of the newest frame. When motion is unknown, the filter never
   suppresses: plain radius alerting applies, and the summary line says why:
   `note=motion unknown (no baseline)` (less than 8 minutes of history, or a
-  gap over 30), `(few cells)` (too little echo in the box), `(corr 0.21)`
+  gap over 30), `(reflectivity stale)` (no current reflectivity frame),
+  `(few cells)` (too little echo in the box), `(corr 0.21)`
   (the two frames do not match at any shift up to 120 km/h) or
   `(small shift)` (under 2 grid cells). Rain at the site always alerts.
 
@@ -172,8 +174,9 @@ Each poll cycle ends with one summary line, for example:
 - `outcome` — what the cycle actually did: `send`, `repeat`, `skip`, `re-armed`,
   `none`, `send-failed`, or `scope-offline` (no scope answered, so nothing was
   checked; the line then shows `radar=skipped`).
-- `note` — `-` normally, `reflectivity moving away` when the direction filter
-  dropped the radar echo this cycle, `motion unknown (...)` when it could not
+- `note` — `-` normally, `reflectivity moving away`, `preciprate moving away`
+  or `reflectivity+preciprate moving away` when the direction filter dropped
+  the radar echo this cycle, `motion unknown (...)` when it could not
   estimate motion and alerted on plain radius, or `no scope online (...)` on the
   scope-offline path.
 

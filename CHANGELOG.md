@@ -10,9 +10,11 @@ Keep a Changelog; versions follow SemVer.
   threshold on the first recorded storm (motion unknown on 309 of 309 polls); it is replaced by
   normalised cross-correlation of the >= 20 dBZ echo masks of two reflectivity frames about
   20 minutes apart, chosen by time so the result does not depend on `POLL_SEC`. Sparse masks
-  (under 30 cells) and shifts over 120 km/h are rejected. Motion is now estimated whichever
-  product qualified, and the frame cache holds 16 frames per product. On the same recording
-  motion is known on all but 7 of the polls that had an echo in range. `DIRECTION_FILTER` stays
+  (under 30 cells) and shifts over 120 km/h are rejected, echo crossing the box edge does not
+  wrap to the other side, and a reflectivity history that is no longer current is never used.
+  Motion is now estimated whichever product qualified, the ETA counts from the frame the echo
+  was found in, and the frame cache holds 16 frames per product. Replaying the same recording
+  with the site's settings, motion is unknown on 7 polls. `DIRECTION_FILTER` stays
   off by default (#47, #48).
 
 ### Changed

@@ -42,8 +42,9 @@ Run the same folder with different settings and note when the first
 - `MIN_DBZ` 25 vs 30: earlier alerts versus alerts for cells that never arrive.
 - `MIN_CELLS`, `ALERT_RADIUS_KM`: lead time versus false alarms.
 - `DIRECTION_FILTER=1`: how often the summary shows `note=motion unknown (...)`
-  (plain alerting used; the reason is in the brackets) and whether any cycle shows `note=reflectivity moving away` for a
-  storm that did reach you. That last case is the one to watch for; if it
+  (plain alerting used; the reason is in the brackets) and whether any cycle
+  shows a `moving away` note (grep for that; the products dropped are named
+  before it) for a storm that did reach you. That last case is the one to watch for; if it
   happens on your data, keep the filter off.
 
 Worked examples from real captures will be added here.

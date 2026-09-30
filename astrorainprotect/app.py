@@ -106,20 +106,26 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
     if cfg.direction_filter:
         # Motion comes from the reflectivity field across the whole box, whichever product
         # qualified inside the radius (#47).
+        # The cache can outlive a failed fetch, so only a current frame may say where the
+        # storm is going.
         refl_frames = app.radar.frames("reflectivity")
-        m, unknown = estimate(refl_frames)
+        if refl_frames and radar_status(refl_frames[-1], now).available:
+            m, unknown = estimate(refl_frames)
+        else:
+            m, unknown = None, "reflectivity stale"
         app.last_motion = m
         if m is not None:
             # Project every qualifying cell of every product; any one entering the circle is
             # enough, and the ETA is the earliest entry (#11).
             hit_radius = max(cfg.now_radius_km, cfg.alert_radius_km / 4)
-            approaches = [project(d, m, hit_radius_km=hit_radius, lookahead_min=cfg.lookahead_min)
-                          for d in hits]
-            hitting = [a for a in approaches if a.will_hit]
+            approaches = [
+                (project(d, m, hit_radius_km=hit_radius, lookahead_min=cfg.lookahead_min), d)
+                for d in hits]
+            hitting = [ad for ad in approaches if ad[0].will_hit]
             if hitting:
-                a = min(hitting, key=lambda a: a.eta_min or 0.0)
+                a, d = min(hitting, key=lambda ad: ad[0].eta_min or 0.0)
             else:
-                a = min(approaches, key=lambda a: a.closest_km)
+                a, d = min(approaches, key=lambda ad: ad[0].closest_km)
             if not a.will_hit:
                 log.info(
                     "radar echo moving away (closest approach %.1f km, motion %.1f/%.1f "
@@ -128,9 +134,10 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
                 )
                 app.last_note = f"{'+'.join(d.product for d in hits)} moving away"
                 return None
-            # The projection runs from the frame's valid time; count down the frame's age so
-            # the message says how long from now. will_hit above stays on the raw projection.
-            age_min = (now - refl_frames[-1].valid_time).total_seconds() / 60
+            # The projection runs from the valid time of the frame the echo was found in;
+            # count down that frame's age so the message says how long from now. will_hit
+            # above stays on the raw projection.
+            age_min = (now - app.radar.frames(d.product)[-1].valid_time).total_seconds() / 60
             eta = max(0.0, (a.eta_min or 0.0) - age_min)
             if eta >= 0.5:  # below that the headline already says "arriving now" (#32)
                 detail += f", eta {eta:.0f} min"

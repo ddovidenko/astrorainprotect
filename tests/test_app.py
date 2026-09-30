@@ -482,6 +482,34 @@ def test_direction_filter_does_not_suppress_preciprate_hit(tmp_path):
     assert len(app.notifier.sent) == 1
 
 
+def _precip_where(frame):
+    return make_frame(np.where(frame.values > 0, 1.0, 0.0), product="preciprate", valid_time=NOW)
+
+
+def test_direction_filter_ignores_stale_reflectivity_history(tmp_path):
+    """The reflectivity fetch fails while PrecipRate qualifies: motion from cached frames that
+    are no longer current must not drop the alert."""
+    old = [moving_storm(k, toward=False, age_min=45.0) for k in range(3)]
+    radar = HistoryRadar(old, preciprate=_precip_where(old[-1]))
+    radar.by_product["reflectivity"] = None
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    line = run_cycle(app)
+    assert len(app.notifier.sent) == 1, line
+    assert "note=motion unknown (reflectivity stale)" in line
+
+
+def test_eta_counts_from_the_frame_that_holds_the_echo(tmp_path):
+    """Reflectivity is 10 minutes old but under MIN_DBZ in the radius; the PrecipRate frame
+    that qualified is current, so its projection is not shortened by the reflectivity age."""
+    def eta(refl_age):
+        frames = [moving_storm(k, age_min=refl_age, value=22.0) for k in range(3)]
+        app = build(tmp_path / f"a{refl_age}", env={"DIRECTION_FILTER": "1"},
+                    radar=HistoryRadar(frames, preciprate=_precip_where(frames[-1])))
+        run_cycle(app)
+        return int(re.match(r"Rain expected in about (\d+) min", app.notifier.sent[0][1]).group(1))
+    assert eta(10.0) == eta(0.0)
+
+
 def test_main_exits_when_state_dir_not_writable(monkeypatch, capsys, tmp_path):
     """Issue #14: discover an unwritable STATE_DIR at startup, not on the first alert."""
     import os as _os

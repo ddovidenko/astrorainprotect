@@ -74,7 +74,7 @@ def test_render_marks_house_and_radius():
 def test_render_draws_motion_vector():
     g = grid()
     g[62:65, 38:41] = 40.0
-    m = Motion(u_km_per_min=0.6, v_km_per_min=0.6, confidence=0.9, frames_used=3)
+    m = Motion(u_km_per_min=0.6, v_km_per_min=0.6, confidence=0.9, baseline_min=10)
     with_m = decode_png(render(make_frame(g, product="reflectivity"), *HOME, alert_radius_km=20.0,
                                hit_radius_km=5.0, motion=m))
     without = decode_png(render(make_frame(g, product="reflectivity"), *HOME, alert_radius_km=20.0,

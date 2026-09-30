@@ -1,9 +1,9 @@
 # astrorainprotect
 
-Self-hosted rain alarm for a home in Cypress (NW Houston), Texas. Purpose: warn me,
-via push notification to an iPhone, when rain is heading toward my coordinates, with
-enough lead time to bring in astrophotography gear (ZWO Seestar smart telescopes)
-left outside overnight. False alarms are cheap; a missed alarm is expensive.
+Self-hosted rain alarm for a home anywhere in the continental US. Purpose: warn
+me, via push notification to an iPhone, when rain is heading toward my
+coordinates, with enough lead time to bring in astrophotography gear (ZWO Seestar
+smart telescopes) left outside overnight. False alarms are cheap; a missed alarm is expensive.
 
 This file is the project brief for Claude Code. Read it fully before touching code.
 
@@ -15,8 +15,8 @@ posts to **ntfy** when its minute-by-minute forecast shows rain within N minutes
 The plumbing works well; the data source does not. Pirate Weather's "minutely"
 data is derived from the NOAA HRRR model, not from radar. On 2026-09-23 it reported
 `now=0.0 mm/h, max_prob=0%` for the full hour while it was actually raining at the
-house and Windy's radar showed the cell clearly. Gulf Coast pop-up convection forms
-in place in under an hour; a model run from earlier in the day never sees it.
+house and Windy's radar showed the cell clearly. Pop-up convection forms in place
+in under an hour; a model run from earlier in the day never sees it.
 
 Conclusion: the alert trigger must come from **actual weather radar**. Pirate
 Weather stays as a secondary signal for organized systems (fronts), where it can

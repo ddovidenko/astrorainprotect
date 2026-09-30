@@ -5,14 +5,14 @@ Status: approved 2026-09-23; amended by the implementation plan (see its "Spec a
 
 ## 1. Purpose
 
-Self-hosted rain alarm for a house in Cypress (NW Houston), Texas. It pushes a
+Self-hosted rain alarm for a house anywhere in the continental US. It pushes a
 notification to an iPhone via ntfy when rain is heading for the house, early
 enough to bring in ZWO Seestar telescopes left outside overnight. A missed alarm
 is expensive; a false alarm is cheap.
 
 The currently deployed version (`legacy/rain-check.sh`) polls Pirate Weather's
-minutely forecast. That forecast is model-derived and misses Gulf Coast pop-up
-convection. The new version triggers from actual NOAA MRMS radar and keeps
+minutely forecast. That forecast is model-derived and misses pop-up convection
+that forms in place. The new version triggers from actual NOAA MRMS radar and keeps
 Pirate Weather as a secondary trigger for organized systems.
 
 Successor to the `rain-radar-alert` brief; everything is renamed

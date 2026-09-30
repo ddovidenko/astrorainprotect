@@ -10,16 +10,19 @@ Keep a Changelog; versions follow SemVer.
   threshold on the first recorded storm (motion unknown on 309 of 309 polls); it is replaced by
   normalised cross-correlation of the >= 20 dBZ echo masks of two reflectivity frames about
   20 minutes apart, chosen by time so the result does not depend on `POLL_SEC`. Sparse masks
-  (under 30 cells) and shifts over 120 km/h are rejected, echo crossing the box edge does not
-  wrap to the other side, and a reflectivity history that is no longer current is never used.
-  Motion is now estimated whichever product qualified, the ETA counts from the frame the echo
-  was found in, and the frame cache holds 16 frames per product. Replaying the same recording
-  with the site's settings, motion is unknown on 7 polls. `DIRECTION_FILTER` stays
+  (under 30 cells) and shifts over 120 km/h are rejected, and echo crossing the box edge does
+  not wrap to the other side. Motion counts as unknown, so plain radius alerting applies, when
+  reflectivity was not fetched this poll or is over 10 minutes old, when either frame has
+  coverage gaps, when the best match sits at the edge of the search, and when the frames match
+  about as well without moving (a decaying echo). Motion is now estimated whichever product
+  qualified, the ETA counts from the frame the echo was found in, and the frame cache holds 16
+  frames per product. Replaying the same recording with the site's settings, motion is unknown
+  on 44 polls, 37 of them a decaying echo with no clear shift. `DIRECTION_FILTER` stays
   off by default (#47, #48).
 
 ### Changed
 - With `DIRECTION_FILTER=1` the summary line says why motion is unknown
-  (`note=motion unknown (no baseline|few cells|corr 0.NN|small shift)`), and the "moving away"
+  (`note=motion unknown (<reason>)`; the README lists the reasons), and the "moving away"
   note names every product that was dropped (#47).
 - Project brief and design spec describe the site generically; CONTRIBUTING asks the same of
   future docs, commits, issues and pull requests.

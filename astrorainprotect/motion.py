@@ -18,6 +18,9 @@ MIN_MASK_CELLS = 30          # sparser masks gave wild shifts with a confident-l
 BASELINE_MIN = 20.0          # preferred age of the frame the newest one is compared with
 BASELINE_RANGE_MIN = (8.0, 30.0)
 MAX_SPEED_KM_PER_MIN = 2.0   # 120 km/h; faster shifts are not searched
+SEARCH_LIMIT = 0.8           # a peak this far out (squared, of the reach) is unrelated echo
+MIN_GAIN_OVER_STILL = 0.05   # the shift must match this much better than no shift at all
+MAX_MISSING = 0.1            # frames with more of the box missing are not compared
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,13 @@ class Approach:
     closest_km: float
 
 
+def mask_corr(overlap: float, na: float, nb: float, size: int) -> float:
+    """Correlation coefficient of two 0/1 masks of `size` cells with na and nb cells set, of
+    which `overlap` coincide. 0.0 when either mask is empty or full."""
+    norm = math.sqrt(na * (1 - na / size) * nb * (1 - nb / size))
+    return (overlap - na * nb / size) / norm if norm else 0.0
+
+
 def xcorr_shift(a: np.ndarray, b: np.ndarray, *, max_dy: float,
                 max_dx: float) -> tuple[int, int, float]:
     """(dy, dx, corr): the shift of 0/1 echo mask a that best overlays it on mask b.
@@ -48,13 +58,11 @@ def xcorr_shift(a: np.ndarray, b: np.ndarray, *, max_dy: float,
     """
     n, m = a.shape
     na, nb = float(a.sum()), float(b.sum())
-    size = n * m
-    norm = math.sqrt(na * (1 - na / size) * nb * (1 - nb / size))
-    if norm == 0.0:
+    if mask_corr(0.0, na, nb, n * m) == 0.0:    # an empty or full mask matches nothing
         return 0, 0, 0.0
     # overlap[s] = cells set in both a shifted by s and b; zero-padded so nothing wraps
     pad = (2 * n, 2 * m)
-    fa, fb = np.fft.rfft2(a, pad), np.fft.rfft2(b, pad)
+    fa, fb = np.fft.rfft2(a.astype(np.float64), pad), np.fft.rfft2(b.astype(np.float64), pad)
     overlap = np.rint(np.fft.irfft2(fb * np.conj(fa), pad))
     sy = np.fft.fftfreq(pad[0], 1.0 / pad[0])[:, None]   # signed shift of each row/column
     sx = np.fft.fftfreq(pad[1], 1.0 / pad[1])[None, :]
@@ -64,7 +72,7 @@ def xcorr_shift(a: np.ndarray, b: np.ndarray, *, max_dy: float,
     # whichever argmax meets first, and report the correlation there.
     tj, ti = np.nonzero(allowed & (overlap == overlap[allowed].max()))
     dy, dx = round(float(sy[tj, 0].mean())), round(float(sx[0, ti].mean()))
-    return dy, dx, float((overlap[dy % pad[0], dx % pad[1]] - na * nb / size) / norm)
+    return dy, dx, mask_corr(float(overlap[dy % pad[0], dx % pad[1]]), na, nb, n * m)
 
 
 def _baseline(frames: Sequence[Frame]) -> tuple[Frame, float] | None:
@@ -81,6 +89,8 @@ def _baseline(frames: Sequence[Frame]) -> tuple[Frame, float] | None:
         dt = (last.valid_time - f.valid_time).total_seconds() / 60.0
         if not lo <= dt <= hi or f.values.shape != last.values.shape:
             continue
+        if f.missing_fraction > MAX_MISSING:   # echo cut off by a coverage gap reads as motion
+            continue
         if best is None or abs(dt - BASELINE_MIN) < abs(best[1] - BASELINE_MIN):
             best = (f, dt)
     return best
@@ -91,10 +101,15 @@ def estimate(frames: Sequence[Frame], *,
     """Estimate storm motion from reflectivity frames: (motion, "") or (None, reason).
 
     The reason says why motion is unknown: "no baseline" (no frame 8 to 30 minutes older than
-    the newest), "few cells" (too little echo in either frame), "corr 0.NN" (the echo masks do
-    not match at any plausible shift) or "small shift" (under MIN_SHIFT_CELLS, including none:
-    only whole-cell displacement is resolved).
+    the newest and free of coverage gaps), "radar gaps" (the newest frame has them), "few cells"
+    (too little echo in either frame), "corr 0.NN" (the echo masks do not match at any
+    plausible shift), "shift at search limit" (the best match is as far as the search reaches,
+    which is unrelated echo), "small shift" (under MIN_SHIFT_CELLS, including none: only
+    whole-cell displacement is resolved) or "no clear shift" (the masks match about as well
+    without moving, as a decaying echo does).
     """
+    if frames and frames[-1].missing_fraction > MAX_MISSING:
+        return None, "radar gaps"
     base = _baseline(frames) if frames else None
     if base is None:
         return None, "no baseline"
@@ -110,11 +125,17 @@ def estimate(frames: Sequence[Frame], *,
     km_ns = dlat * KM_PER_DEG
     km_ew = dlon * KM_PER_DEG * float(np.cos(np.radians(lat)))
     reach_km = MAX_SPEED_KM_PER_MIN * dt_min
-    dy, dx, corr = xcorr_shift(a, b, max_dy=reach_km / km_ns, max_dx=reach_km / km_ew)
+    max_dy, max_dx = reach_km / km_ns, reach_km / km_ew
+    dy, dx, corr = xcorr_shift(a, b, max_dy=max_dy, max_dx=max_dx)
     if corr < min_confidence:
         return None, f"corr {max(corr, 0.0):.2f}"
+    if (dy / max_dy) ** 2 + (dx / max_dx) ** 2 >= SEARCH_LIMIT:
+        return None, "shift at search limit"
     if math.hypot(dy, dx) < MIN_SHIFT_CELLS:
         return None, "small shift"
+    still = mask_corr(float((a * b).sum()), float(a.sum()), float(b.sum()), a.size)
+    if corr - still < MIN_GAIN_OVER_STILL:
+        return None, "no clear shift"
     return Motion(
         u_km_per_min=dx * km_ew / dt_min,
         v_km_per_min=-dy * km_ns / dt_min,   # rows increase southward

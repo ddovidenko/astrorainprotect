@@ -31,6 +31,7 @@ log = logging.getLogger("astrorainprotect")
 
 RADAR_MAX_AGE = timedelta(minutes=15)
 RADAR_MAX_MISSING = 0.5
+MOTION_MAX_AGE = timedelta(minutes=10)   # older reflectivity does not say where echoes go now
 TITLE_TEST = "Rain alert test"
 RADAR_FAILURE_KINDS = ("listing", "download", "decode", "fetch")
 
@@ -106,13 +107,14 @@ def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | N
     if cfg.direction_filter:
         # Motion comes from the reflectivity field across the whole box, whichever product
         # qualified inside the radius (#47).
-        # The cache can outlive a failed fetch, so only a current frame may say where the
-        # storm is going.
+        # The cache outlives a failed fetch, so motion is only trusted when reflectivity
+        # was fetched and usable this poll and its newest frame is recent.
         refl_frames = app.radar.frames("reflectivity")
-        if refl_frames and radar_status(refl_frames[-1], now).available:
+        if (any(d.product == "reflectivity" for d in dets) and refl_frames
+                and now - refl_frames[-1].valid_time <= MOTION_MAX_AGE):
             m, unknown = estimate(refl_frames)
         else:
-            m, unknown = None, "reflectivity stale"
+            m, unknown = None, "no current reflectivity"
         app.last_motion = m
         if m is not None:
             # Project every qualifying cell of every product; any one entering the circle is

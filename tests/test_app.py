@@ -420,8 +420,9 @@ def test_direction_filter_projects_every_cell(tmp_path):
 
 def test_arriving_now_detail_has_no_zero_eta(tmp_path):
     """Issue #32: when the ETA rounds to 0 the detail must not say 'eta 0 min'."""
-    radar = HistoryRadar([moving_storm(k, toward=True, age_min=12.0) for k in range(3)])
-    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    # hit radius 10 km: the echo 13 km out is about 4 minutes away, and the frame is 8 old
+    radar = HistoryRadar([moving_storm(k, toward=True, age_min=8.0) for k in range(3)])
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1", "ALERT_RADIUS_KM": "40"}, radar=radar)
     run_cycle(app)
     assert len(app.notifier.sent) == 1
     msg = app.notifier.sent[0][1]
@@ -495,11 +496,64 @@ def test_direction_filter_ignores_stale_reflectivity_history(tmp_path):
     app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
     line = run_cycle(app)
     assert len(app.notifier.sent) == 1, line
-    assert "note=motion unknown (reflectivity stale)" in line
+    assert "note=motion unknown (no current reflectivity)" in line
+
+
+def test_direction_filter_needs_reflectivity_fetched_this_poll(tmp_path):
+    """A history that was current one poll ago must not drop a PrecipRate alert once the
+    reflectivity fetch fails."""
+    from astrorainprotect.mrms import MrmsError
+    recent = [moving_storm(k, toward=False, age_min=4.0) for k in range(3)]
+    radar = HistoryRadar(recent, preciprate=_precip_where(recent[-1]))
+    radar.error, radar.error_for = MrmsError("S3 listing failed", kind="listing"), "reflectivity"
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    line = run_cycle(app)
+    assert len(app.notifier.sent) == 1, line
+    assert "note=motion unknown (no current reflectivity)" in line
+
+
+def test_direction_filter_without_any_reflectivity_frame(tmp_path):
+    from astrorainprotect.mrms import MrmsError
+    radar = FakeRadar(storm("preciprate", 1.0), None,
+                      error=MrmsError("S3 listing failed", kind="listing"),
+                      error_for="reflectivity")
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    line = run_cycle(app)
+    assert len(app.notifier.sent) == 1, line
+    assert "note=motion unknown (no current reflectivity)" in line
+
+
+def test_direction_filter_ignores_reflectivity_that_stopped_updating(tmp_path):
+    # 12 minutes old: still inside RADAR_MAX_AGE, too old to say where the storm is going now
+    lagging = [moving_storm(k, toward=False, age_min=12.0) for k in range(3)]
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"},
+                radar=HistoryRadar(lagging, preciprate=_precip_where(lagging[-1])))
+    line = run_cycle(app)
+    assert len(app.notifier.sent) == 1, line
+    assert "note=motion unknown (no current reflectivity)" in line
+
+
+def test_eta_is_the_earliest_cell_counted_from_its_own_frame(tmp_path):
+    """Both products qualify; the PrecipRate cell is nearer, so it sets the ETA, and the age
+    taken off is that of the PrecipRate frame."""
+    def eta(precip_age):
+        frames = [moving_storm(k) for k in range(3)]
+        radar = HistoryRadar(frames)
+        if precip_age is not None:
+            g = np.zeros((101, 101), dtype=np.float32)
+            g[59:62, 41:44] = 1.0                       # ~12 km SW, ahead of the reflectivity
+            radar.by_product["preciprate"] = make_frame(
+                g, product="preciprate", valid_time=NOW - timedelta(minutes=precip_age))
+        app = build(tmp_path / f"p{precip_age}", env={"DIRECTION_FILTER": "1"}, radar=radar)
+        run_cycle(app)
+        return int(re.match(r"Rain expected in about (\d+) min", app.notifier.sent[0][1]).group(1))
+    reflectivity_only, fresh, aged = eta(None), eta(0.0), eta(6.0)
+    assert fresh < reflectivity_only
+    assert abs((fresh - aged) - 6) <= 1
 
 
 def test_eta_counts_from_the_frame_that_holds_the_echo(tmp_path):
-    """Reflectivity is 10 minutes old but under MIN_DBZ in the radius; the PrecipRate frame
+    """Reflectivity is 8 minutes old but under MIN_DBZ in the radius; the PrecipRate frame
     that qualified is current, so its projection is not shortened by the reflectivity age."""
     def eta(refl_age):
         frames = [moving_storm(k, age_min=refl_age, value=22.0) for k in range(3)]
@@ -507,7 +561,7 @@ def test_eta_counts_from_the_frame_that_holds_the_echo(tmp_path):
                     radar=HistoryRadar(frames, preciprate=_precip_where(frames[-1])))
         run_cycle(app)
         return int(re.match(r"Rain expected in about (\d+) min", app.notifier.sent[0][1]).group(1))
-    assert eta(10.0) == eta(0.0)
+    assert eta(8.0) == eta(0.0)
 
 
 def test_main_exits_when_state_dir_not_writable(monkeypatch, capsys, tmp_path):

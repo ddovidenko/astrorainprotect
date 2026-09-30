@@ -62,6 +62,14 @@ def test_xcorr_shift_does_not_wrap_around_the_box():
     assert corr < 0.1
 
 
+def test_xcorr_shift_does_not_wrap_north_to_south():
+    a = np.zeros((101, 101), dtype=np.float32)
+    b = np.zeros((101, 101), dtype=np.float32)
+    a[0:12, 40:60] = 1.0
+    b[89:101, 40:60] = 1.0
+    assert xcorr_shift(a, b, max_dy=20, max_dx=20)[2] < 0.1
+
+
 def test_xcorr_shift_reports_correlation_at_the_shift_it_returns():
     # the echo splits and moves both ways: two tied peaks, and their middle matches nothing
     a = (blob(50, 50) > 0).astype(np.float32)
@@ -187,6 +195,50 @@ def test_estimate_rejects_low_correlation_and_says_so():
     m, reason = estimate(frames)
     assert m is None
     assert reason.startswith("corr 0.")
+
+
+def test_estimate_reports_the_correlation_it_rejected():
+    # 20 of 100 cells line up with the earlier block; the rest reappear far out of reach
+    a = np.zeros((101, 101), dtype=np.float32)
+    b = np.zeros((101, 101), dtype=np.float32)
+    a[10:20, 10:20] = 40.0
+    b[10:20, 14:16] = 40.0
+    b[80:90, 60:68] = 40.0
+    assert estimate([refl(a, 0), refl(b, 10)]) == (None, "corr 0.19")
+
+
+def test_estimate_rejects_a_shift_at_the_edge_of_the_search():
+    # unrelated thick echoes at opposite edges: the best match is as far as the search reaches
+    a = np.zeros((101, 101), dtype=np.float32)
+    b = np.zeros((101, 101), dtype=np.float32)
+    a[40:61, 0:30] = 40.0
+    b[40:61, 71:101] = 40.0
+    assert estimate([refl(a, 0), refl(b, 30)]) == (None, "shift at search limit")
+
+
+def test_estimate_rejects_a_shift_that_matches_no_better_than_standing_still():
+    # the echo shrinks inside its old outline; on the recorded storm such decay read as motion
+    a = np.zeros((101, 101), dtype=np.float32)
+    b = np.zeros((101, 101), dtype=np.float32)
+    a[30:71, 30:71] = 40.0
+    b[30:71, 33:61] = 40.0
+    assert estimate([refl(a, 0), refl(b, 10)]) == (None, "no clear shift")
+
+
+def gappy(values, minute, missing):
+    return make_frame(values, product="reflectivity", valid_time=T0 + timedelta(minutes=minute),
+                      missing_fraction=missing)
+
+
+def test_estimate_skips_a_baseline_with_radar_gaps():
+    # part of the box had no coverage in the older frame: its echo is cut off, not moved
+    moved = np.roll(blob(30, 40), (0, 6), axis=(0, 1))
+    assert estimate([gappy(blob(30, 40), 0, 0.28), refl(moved, 10)]) == (None, "no baseline")
+
+
+def test_estimate_rejects_a_newest_frame_with_radar_gaps():
+    moved = np.roll(blob(30, 40), (0, 6), axis=(0, 1))
+    assert estimate([refl(blob(30, 40), 0), gappy(moved, 10, 0.28)]) == (None, "radar gaps")
 
 
 def test_estimate_rejects_implausible_speed():

@@ -139,11 +139,15 @@ script):
   `reflectivity`, `preciprate` or `reflectivity+preciprate`). When it will hit, the alert carries an ETA, counted
   down by the age of the newest frame. When motion is unknown, the filter never
   suppresses: plain radius alerting applies, and the summary line says why:
-  `note=motion unknown (no baseline)` (less than 8 minutes of history, or a
-  gap over 30), `(reflectivity stale)` (no current reflectivity frame),
-  `(few cells)` (too little echo in the box), `(corr 0.21)`
-  (the two frames do not match at any shift up to 120 km/h) or
-  `(small shift)` (under 2 grid cells). Rain at the site always alerts.
+  `note=motion unknown (no baseline)` (less than 8 minutes of gap-free
+  history, or a gap over 30), `(no current reflectivity)` (reflectivity was
+  not fetched this poll or is over 10 minutes old), `(radar gaps)` (over 10%
+  of the newest frame is missing), `(few cells)` (too little echo in the
+  box), `(corr 0.21)` (the two frames do not match at any shift up to
+  120 km/h), `(shift at search limit)` (the best match is as far as the
+  search reaches, so it is unrelated echo), `(small shift)` (under 2 grid
+  cells) or `(no clear shift)` (the frames match about as well without
+  moving, as a decaying echo does). Rain at the site always alerts.
 
 ## Reading the logs
 

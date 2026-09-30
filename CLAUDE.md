@@ -99,7 +99,9 @@ Given the subset grid and its lat/lon coordinates:
    the earliest one. Motion comes from cross-correlating the >= 20 dBZ echo
    masks of two reflectivity frames about 20 minutes apart (8 to 30 allowed,
    chosen by time), whichever product qualified (#47); shifts under 2 cells,
-   correlation under 0.3 or fewer than 30 echo cells count as unknown motion.
+   correlation under 0.3, fewer than 30 echo cells, a match no better than
+   standing still, coverage gaps, or reflectivity not fetched this poll all
+   count as unknown motion.
    If motion cannot be estimated (new cell, too little history), fall back to
    plain radius alerting — never suppress an alert because the filter lacks
    data. Known weakness: the projection drops alerts during an approach with

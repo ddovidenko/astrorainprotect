@@ -104,6 +104,49 @@ def test_preciprate_storm_sends_alert(tmp_path):
     assert "preciprate" in app.notifier.sent[0][1]
 
 
+def cells(product, value, n):
+    """n qualifying-size cells ~11 km SW, in a row."""
+    g = np.zeros((101, 101), dtype=np.float32)
+    g[60, 40:40 + n] = value
+    return make_frame(g, product=product, valid_time=NOW - timedelta(minutes=2))
+
+
+def test_message_names_the_product_that_did_not_qualify(tmp_path):
+    """#46: both products appear every time; the qualifying one first, the other with its state."""
+    app = build(tmp_path, radar=FakeRadar(storm("preciprate", 1.0), cells("reflectivity", 32.0, 1)))
+    run_cycle(app)
+    msg = app.notifier.sent[0][1]
+    assert re.search(r"radar: preciprate 1 mm/h [\d.]+ km to the SW; "
+                     r"reflectivity 32 dBZ, 1 cell, below threshold", msg), msg
+
+
+def test_message_says_when_the_other_product_has_no_echo(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert app.notifier.sent[0][1].endswith("; preciprate none in range")
+
+
+def test_message_says_when_the_other_product_is_under_threshold(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(storm("preciprate", 1.0), cells("reflectivity", 18.0, 5)))
+    run_cycle(app)
+    assert app.notifier.sent[0][1].endswith("; reflectivity 18 dBZ, under threshold")
+
+
+def test_message_says_when_the_other_product_has_no_data(tmp_path):
+    from astrorainprotect.mrms import MrmsError
+    radar = FakeRadar(None, storm("reflectivity", 40.0),
+                      error=MrmsError("S3 listing failed", kind="listing"), error_for="preciprate")
+    app = build(tmp_path, radar=radar)
+    run_cycle(app)
+    assert app.notifier.sent[0][1].endswith("; preciprate no data")
+
+
+def test_message_pluralises_cells(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(storm("preciprate", 1.0), cells("reflectivity", 31.0, 2)))
+    run_cycle(app)
+    assert "reflectivity 31 dBZ, 2 cells, below threshold" in app.notifier.sent[0][1]
+
+
 def test_second_cycle_skips(tmp_path):
     app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
     run_cycle(app)

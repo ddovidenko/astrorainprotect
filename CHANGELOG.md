@@ -24,6 +24,10 @@ Keep a Changelog; versions follow SemVer.
   off by default (#47, #48).
 
 ### Changed
+- The radar detail in an alert names both products every time, qualifying ones first, the other
+  with its state: `reflectivity 28 dBZ, 1 cell, below threshold`, `reflectivity 18 dBZ, under
+  threshold`, `reflectivity none in range` or `reflectivity no data`. Products are separated by
+  `;`. Consecutive messages for one storm now read alike (#46).
 - Replay (`REPLAY_DIR`) steps the clock by `POLL_SEC` instead of running every frame time, so
   notification counts match what the live loop would have sent; `POLL_SEC=120` runs every
   frame (#50).

@@ -359,6 +359,24 @@ def test_pirate_announcement_failure_does_not_block_radar(tmp_path):
     assert "Rain incoming" in titles and "Pirate Weather unavailable" in titles
 
 
+def test_pirate_announcement_exception_does_not_block_radar(tmp_path):
+    """Like the scope announcements: informational, so any error in it is logged and dropped."""
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    app.pirate = FakePirate(error=PirateError("timed out"))
+    app.failures["pirate"] = 2                      # the next failure triggers the announcement
+    real_send = app.notifier.send
+
+    def send(title, message, priority=None, attachment=None):
+        if title.startswith("Pirate Weather"):
+            raise RuntimeError("boom")
+        return real_send(title, message, priority, attachment)
+
+    app.notifier.send = send
+    line = run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]
+    assert "outcome=send" in line
+
+
 def test_pirate_raining_now_does_not_silence_radar(tmp_path):
     app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
     run_cycle(app)

@@ -225,6 +225,14 @@ def _announce_scope_changes(app: App, online: list[str]) -> None:
 STARTUP_FAILURE_MARKER = "astrorainprotect_startup_failure_sent"
 
 
+def _pirate_announce(app: App, fn: Callable[..., None], *args: str) -> None:
+    """Run an announcement; it is informational only and must never block the radar path."""
+    try:
+        fn(app, *args)
+    except Exception:
+        log.exception("Pirate Weather announcement failed")
+
+
 def _announce_pirate_down(app: App, reason: str) -> None:
     """Issue #51: after PIRATE_DOWN_POLLS consecutive failures, say once that the secondary
     source is gone. A failed send is retried next poll; the radar path is never affected."""
@@ -393,7 +401,7 @@ def run_cycle(app: App) -> str:
     if app.pirate is not None:
         try:
             pr = app.pirate.check(now)
-            _pirate_recovered(app)
+            _pirate_announce(app, _pirate_recovered)
             pirate_txt = "ok"
         except PirateError as exc:
             app.failures["pirate"] += 1
@@ -402,7 +410,7 @@ def run_cycle(app: App) -> str:
                 exc, app.failures["pirate"],
             )
             pirate_txt = f"down:{app.failures['pirate']}"
-            _announce_pirate_down(app, str(exc))
+            _pirate_announce(app, _announce_pirate_down, str(exc))
             pr = None
         if pr is not None:
             if cfg.debug >= 1:

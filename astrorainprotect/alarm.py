@@ -27,6 +27,7 @@ class AlarmInputs:
     latched: bool
     latch_age_sec: float | None
     repeat_min: int
+    poll_sec: int = 0      # a repeat is due within half a poll of the interval (#53)
 
 
 @dataclass(frozen=True)
@@ -72,7 +73,10 @@ def decide(inputs: AlarmInputs) -> Decision:
             title = TITLE_RAINING if raining else TITLE_FIRST
             return Decision(Action.SEND, title, compose_message(active))
         age = inputs.latch_age_sec
-        if inputs.repeat_min > 0 and age is not None and age >= inputs.repeat_min * 60:
+        # Polls land a few seconds either side of the interval, so fire on the nearest poll
+        # rather than slipping a whole poll when the clock is a few seconds short (#53).
+        due = inputs.repeat_min * 60 - inputs.poll_sec / 2
+        if inputs.repeat_min > 0 and age is not None and age >= due:
             title = TITLE_RAINING_REPEAT if raining else TITLE_REPEAT
             return Decision(Action.REPEAT, title, compose_message(active))
         return Decision(Action.SKIP)

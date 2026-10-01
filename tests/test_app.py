@@ -112,10 +112,11 @@ def test_second_cycle_skips(tmp_path):
 
 
 def test_repeat(tmp_path):
-    app = build(tmp_path, env={"REPEAT_MIN": "10"},
+    # #53: two polls at 290 s (clock drift) are 580 s apart; the repeat must not slip a poll
+    app = build(tmp_path, env={"REPEAT_MIN": "10", "POLL_SEC": "300"},
                 radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
     run_cycle(app)
-    app.clock = lambda: NOW + timedelta(minutes=11)
+    app.clock = lambda: NOW + timedelta(seconds=580)
     old_values = app.radar.by_product["reflectivity"].values
     app.radar.by_product["reflectivity"] = make_frame(
         old_values, product="reflectivity", valid_time=NOW + timedelta(minutes=9)

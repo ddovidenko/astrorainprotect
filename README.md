@@ -90,9 +90,11 @@ script):
   latched, it sends an alert and latches.
 - **Latch**: while latched, further qualifying cycles are skipped — no repeat
   notifications — unless `REPEAT_MIN` is set.
-- **Repeat**: with `REPEAT_MIN > 0`, a "still raining" repeat alert is sent once
-  the latch has been active for at least that many minutes; with the default
-  `REPEAT_MIN=0`, there is no repeat, ever.
+- **Repeat**: with `REPEAT_MIN > 0`, a "still raining" repeat alert is sent on
+  the poll nearest to that many minutes after the last alert (within half a
+  `POLL_SEC` early counts, so a clock a few seconds short does not push the
+  repeat a whole poll later); with the default `REPEAT_MIN=0`, there is no
+  repeat, ever.
 - **Rain at the site**: if PrecipRate within `NOW_RADIUS_KM` reaches
   `RAINING_NOW` (`raining_now=1`), that is itself a trigger (source `house`,
   ETA 0). Unlatched, it sends a notification titled "Currently raining" with the

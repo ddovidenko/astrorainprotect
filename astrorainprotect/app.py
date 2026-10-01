@@ -380,7 +380,8 @@ def run_cycle(app: App) -> str:
 
     if radar_ok or triggers:
         decision = decide(AlarmInputs(tuple(triggers), app.state.latched(),
-                                      app.state.latch_age_sec(ts), cfg.repeat_min))
+                                      app.state.latch_age_sec(ts), cfg.repeat_min,
+                                      cfg.poll_sec))
     else:
         decision = decide(AlarmInputs((), False, None, cfg.repeat_min))   # NONE
 

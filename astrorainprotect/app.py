@@ -67,6 +67,7 @@ class App:
     last_motion: Motion | None = None   # from the latest radar_trigger, for the snapshot
     scope_misses: dict[str, int] | None = None   # consecutive missed polls per host
     scope_seen: set[str] | None = None           # hosts counted online after the last poll
+    pirate_down_announced: bool = False          # one "unavailable" per outage (#51)
 
     def __post_init__(self) -> None:
         if self.failures is None:
@@ -161,6 +162,7 @@ def _scope_status(cfg: Config, online: list[str] | None) -> str:
 
 
 SCOPE_OFFLINE_POLLS = 2   # consecutive missed polls before a scope counts as offline
+PIRATE_DOWN_POLLS = 3     # consecutive Pirate Weather failures before saying so (#51)
 
 
 def _debounce_scopes(app: App, answered: list[str]) -> list[str]:
@@ -221,6 +223,31 @@ def _announce_scope_changes(app: App, online: list[str]) -> None:
 
 
 STARTUP_FAILURE_MARKER = "astrorainprotect_startup_failure_sent"
+
+
+def _announce_pirate_down(app: App, reason: str) -> None:
+    """Issue #51: after PIRATE_DOWN_POLLS consecutive failures, say once that the secondary
+    source is gone. A failed send is retried next poll; the radar path is never affected."""
+    n = app.failures["pirate"]
+    if n < PIRATE_DOWN_POLLS or app.pirate_down_announced:
+        return
+    msg = f"No answer from Pirate Weather for {n} polls ({reason}). Radar alerts continue."
+    if app.notifier.send("Pirate Weather unavailable", msg, priority="default"):
+        app.pirate_down_announced = True
+    else:
+        log.error("ntfy: Pirate Weather announcement failed; will retry")
+
+
+def _pirate_recovered(app: App) -> None:
+    n = app.failures["pirate"]
+    app.failures["pirate"] = 0
+    if not app.pirate_down_announced:
+        return
+    msg = f"Pirate Weather answered again after {n} failed polls."
+    if app.notifier.send("Pirate Weather back", msg, priority="default"):
+        app.pirate_down_announced = False
+    else:
+        log.error("ntfy: Pirate Weather announcement failed; will retry")
 
 
 def notify_startup_failure(env: Mapping[str, str], reason: str, tmp_dir: Path | str = "/tmp",
@@ -308,7 +335,8 @@ def run_cycle(app: App) -> str:
         if not online:
             app.state.clear_latch()
             line = (f"frame=none age=n/a radar=skipped raining_now=0 eta=none sources=none "
-                    f"latched=0 outcome=scope-offline note=no scope online ({cfg.scope_hosts})")
+                    f"pirate=skipped latched=0 outcome=scope-offline "
+                    f"note=no scope online ({cfg.scope_hosts})")
             log.info(line)
             app.state.heartbeat(ts)
             return line
@@ -361,16 +389,20 @@ def run_cycle(app: App) -> str:
         # Rain forming in place over the house must alert (differs from the legacy re-arm).
         triggers.append(Trigger(source=HOUSE, eta_min=0.0, detail=f"{wet.rate_at_house:.1f} mm/h"))
 
+    pirate_txt = "off"
     if app.pirate is not None:
         try:
             pr = app.pirate.check(now)
-            app.failures["pirate"] = 0
+            _pirate_recovered(app)
+            pirate_txt = "ok"
         except PirateError as exc:
             app.failures["pirate"] += 1
             log.error(
                 "pirate weather: %s (consecutive failures: %d)",
                 exc, app.failures["pirate"],
             )
+            pirate_txt = f"down:{app.failures['pirate']}"
+            _announce_pirate_down(app, str(exc))
             pr = None
         if pr is not None:
             if cfg.debug >= 1:
@@ -417,7 +449,7 @@ def run_cycle(app: App) -> str:
     eta_txt = min([t.eta_min for t in triggers if t.eta_min is not None], default=None)
     line = (f"frame={frame_txt} age={age_txt} {per_product} raining_now={int(raining_now)} "
             f"eta={'none' if eta_txt is None else f'{eta_txt:.0f}min'} "
-            f"sources={','.join(t.source for t in triggers) or 'none'} "
+            f"sources={','.join(t.source for t in triggers) or 'none'} pirate={pirate_txt} "
             f"latched={int(app.state.latched())} outcome={outcome} note={app.last_note or '-'}")
     log.info(line)
     app.state.heartbeat(ts)

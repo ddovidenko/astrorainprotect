@@ -45,6 +45,10 @@ Keep a Changelog; versions follow SemVer.
   Portainer variable to the new name, so existing stack variables carry over unchanged (#25).
 
 ### Added
+- Pirate Weather outages are visible: the summary line carries `pirate=ok|down:N|off|skipped`,
+  and after three consecutive failed polls one default-priority "Pirate Weather unavailable"
+  notification goes out, with "Pirate Weather back" on recovery. The fetch timeout drops from
+  20 s to 10 s so a slow secondary source holds up a radar alert less (#51).
 - Alerts, repeats and the DEBUG=2 test notification carry a radar snapshot PNG as an ntfy
   attachment: the box around the house, house crosshair, alert and hit-radius rings, motion
   vector when known. Rendered with numpy alone; `SNAPSHOT=0` disables; any image failure falls

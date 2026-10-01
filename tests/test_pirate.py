@@ -59,10 +59,12 @@ def test_fetch_forecast_url_and_params():
 
     def handler(request):
         seen["url"] = str(request.url)
+        seen["timeout"] = request.extensions.get("timeout")
         return httpx.Response(200, json=DATA)
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     assert fetch_forecast(client, "KEY123", 29.97, -95.67)["minutely"]["data"]
+    assert seen["timeout"]["read"] == 10.0            # #51: a secondary source must not stall radar
     assert seen["url"].startswith("https://api.pirateweather.net/forecast/KEY123/29.97,-95.67?")
     assert "units=si" in seen["url"] and "exclude=hourly%2Cdaily%2Calerts" in seen["url"]
 

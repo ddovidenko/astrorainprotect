@@ -20,7 +20,7 @@ from astrorainprotect.config import Config, ConfigError, describe, ignored_legac
 from astrorainprotect.detect import Detection, detect
 from astrorainprotect.frame import Frame
 from astrorainprotect.motion import Motion, estimate, project
-from astrorainprotect.mrms import MrmsError, RadarSource
+from astrorainprotect.mrms import PRODUCTS, MrmsError, RadarSource
 from astrorainprotect.notify import Notifier
 from astrorainprotect.pirate import PirateError, PirateSource
 from astrorainprotect.scope import parse_hosts, probe_hosts
@@ -93,15 +93,40 @@ def _detect_product(
     return d, status
 
 
-def radar_trigger(app: App, dets: list[Detection], now: datetime) -> Trigger | None:
-    """Build the radar Trigger from qualifying detections, applying the direction filter."""
+UNITS = {"reflectivity": "dBZ", "preciprate": "mm/h"}
+
+
+def _product_state(product: str, d: Detection | None) -> str:
+    """One clause of the radar detail: what this product showed this poll (#46)."""
+    if d is None:
+        return f"{product} no data"
+    value = f"{product} {d.max_value:.0f} {UNITS[product]}"
+    if d.nearby:
+        return f"{value} {d.describe()}"
+    if d.qualifying_cells:
+        cells = "cell" if d.qualifying_cells == 1 else "cells"
+        return f"{value}, {d.qualifying_cells} {cells}, below threshold"
+    if d.max_value > 0:
+        return f"{value}, under threshold"
+    return f"{product} none in range"
+
+
+def radar_trigger(app: App, products: Mapping[str, Detection | None],
+                  now: datetime) -> Trigger | None:
+    """Build the radar Trigger from qualifying detections, applying the direction filter.
+
+    `products` holds each product that should be reported, with None when it was unavailable
+    this poll. The detail always lists every one of them, qualifying products first, so
+    consecutive messages for one storm read alike (#46).
+    """
+    dets = [d for d in products.values() if d is not None]
     hits = [d for d in dets if d.nearby]
     if not hits:
         return None
     cfg = app.cfg
-    units = {"reflectivity": "dBZ", "preciprate": "mm/h"}
-    detail = ", ".join(
-        f"{d.product} {d.max_value:.0f} {units[d.product]} {d.describe()}" for d in hits
+    detail = "; ".join(
+        [_product_state(d.product, d) for d in hits]
+        + [_product_state(p, d) for p, d in products.items() if d is None or not d.nearby]
     )
     eta: float | None = None
     if cfg.direction_filter:
@@ -353,8 +378,9 @@ def run_cycle(app: App) -> str:
     # When it is raining at the house the "house" trigger describes PrecipRate; the PrecipRate
     # "nearby" detection would only repeat the same cell, so only reflectivity feeds the radar
     # trigger in that case.
-    radar_dets = [d for d in dets if not (raining_now and d.product == "preciprate")]
-    rt = radar_trigger(app, radar_dets, now)
+    radar_products = {p: next((d for d in dets if d.product == p), None)
+                      for p in PRODUCTS if not (raining_now and p == "preciprate")}
+    rt = radar_trigger(app, radar_products, now)
     if rt:
         triggers.append(rt)
     if wet is not None:

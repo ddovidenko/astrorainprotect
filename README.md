@@ -87,7 +87,10 @@ result into a small latch-based state machine (ported from the legacy shell
 script):
 
 - **First trigger**: if rain qualifies nearby and the alarm isn't already
-  latched, it sends an alert and latches.
+  latched, it sends an alert and latches. The radar detail names both products
+  every time, the qualifying one first and the other with its state, for
+  example `radar: preciprate 6 mm/h 19.9 km to the S; reflectivity 28 dBZ,
+  1 cell, below threshold` (or `under threshold`, `none in range`, `no data`).
 - **Latch**: while latched, further qualifying cycles are skipped — no repeat
   notifications — unless `REPEAT_MIN` is set.
 - **Repeat**: with `REPEAT_MIN > 0`, a "still raining" repeat alert is sent on

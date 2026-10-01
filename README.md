@@ -109,6 +109,11 @@ script):
   overhead — in-place convection, the case this project exists for — would
   never have produced an alert. Pirate Weather's own "raining now" never
   silences a radar trigger.
+- **Pirate Weather outage**: with `PW_KEY` set, three consecutive failed polls
+  (15 minutes at `POLL_SEC=300`) send one `default`-priority "Pirate Weather
+  unavailable" notification, and the first successful poll after it sends
+  "Pirate Weather back". Radar alerts are unaffected; the summary line shows
+  `pirate=down:N` meanwhile. The fetch gives up after 10 s.
 - **Scope announcements**: with `SCOPE_HOSTS` set, any host coming online or
   going offline between polls sends a `default`-priority notification ("Scope
   online: 192.168.1.235 came online. Online: 192.168.1.235. Radar checks active." / "Scope offline: ...
@@ -179,6 +184,8 @@ Each poll cycle ends with one summary line, for example:
   house counts as `0min`.
 - `sources` — which trigger(s) fired this cycle: `radar`, `house` (raining at
   the site), `pirate weather`, any combination, or `none`.
+- `pirate` — `ok`, `down:N` (consecutive failed polls), `off` (no `PW_KEY`) or
+  `skipped` (scope gate closed).
 - `latched` — 1 if the alarm is currently latched (an alert is active), else 0.
 - `outcome` — what the cycle actually did: `send`, `repeat`, `skip`, `re-armed`,
   `none`, `send-failed`, or `scope-offline` (no scope answered, so nothing was

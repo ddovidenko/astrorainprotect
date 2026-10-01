@@ -53,10 +53,14 @@ def evaluate(data: dict, *, lookahead_min: int, min_prob: float, min_intensity: 
                         detail, lookahead_min)
 
 
+TIMEOUT_SEC = 10.0   # a secondary source; a slow answer must not hold up the radar alert (#51)
+
+
 def fetch_forecast(client: httpx.Client, key: str, lat: float, lon: float) -> dict:
     url = f"{API}/{key}/{lat},{lon}"
     try:
-        r = client.get(url, params={"units": "si", "exclude": "hourly,daily,alerts"}, timeout=20.0)
+        r = client.get(url, params={"units": "si", "exclude": "hourly,daily,alerts"},
+                       timeout=TIMEOUT_SEC)
     except httpx.HTTPError as exc:
         raise PirateError(f"Pirate Weather fetch failed: {exc}") from exc
     if r.status_code != 200:

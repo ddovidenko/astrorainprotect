@@ -356,6 +356,70 @@ def test_pirate_error_logged_radar_still_alerts(tmp_path, caplog):
     assert len(app.notifier.sent) == 1
 
 
+def test_summary_line_reports_pirate_state(tmp_path):
+    """#51: the summary line says whether the secondary source answered."""
+    app = build(tmp_path)
+    assert "pirate=off" in run_cycle(app)
+    app.pirate = FakePirate(result=pw(None))
+    assert "pirate=ok" in run_cycle(app)
+    app.pirate = FakePirate(error=PirateError("timed out"))
+    assert "pirate=down:1" in run_cycle(app)
+    assert "pirate=down:2" in run_cycle(app)
+
+
+def test_pirate_outage_is_announced_once_and_recovery_once(tmp_path):
+    app = build(tmp_path)
+    app.pirate = FakePirate(error=PirateError("timed out"))
+    for _ in range(5):
+        run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Pirate Weather unavailable"]
+    assert app.notifier.priorities == ["default"]
+    assert "3 polls" in app.notifier.sent[0][1]
+    app.pirate = FakePirate(result=pw(None))
+    run_cycle(app)
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Pirate Weather unavailable",
+                                                 "Pirate Weather back"]
+
+
+def test_short_pirate_outage_is_silent(tmp_path):
+    app = build(tmp_path)
+    app.pirate = FakePirate(error=PirateError("timed out"))
+    run_cycle(app)
+    run_cycle(app)
+    app.pirate = FakePirate(result=pw(None))
+    run_cycle(app)
+    assert app.notifier.sent == []
+
+
+def test_pirate_announcement_failure_does_not_block_radar(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    app.pirate = FakePirate(error=PirateError("timed out"))
+    app.notifier.ok = False
+    for _ in range(3):
+        run_cycle(app)
+    titles = [t for t, _ in app.notifier.sent]
+    assert "Rain incoming" in titles and "Pirate Weather unavailable" in titles
+
+
+def test_pirate_announcement_exception_does_not_block_radar(tmp_path):
+    """Like the scope announcements: informational, so any error in it is logged and dropped."""
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    app.pirate = FakePirate(error=PirateError("timed out"))
+    app.failures["pirate"] = 2                      # the next failure triggers the announcement
+    real_send = app.notifier.send
+
+    def send(title, message, priority=None, attachment=None):
+        if title.startswith("Pirate Weather"):
+            raise RuntimeError("boom")
+        return real_send(title, message, priority, attachment)
+
+    app.notifier.send = send
+    line = run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]
+    assert "outcome=send" in line
+
+
 def test_pirate_raining_now_does_not_silence_radar(tmp_path):
     app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
     run_cycle(app)
@@ -650,7 +714,8 @@ def test_scope_offline_summary_line_has_full_field_set(tmp_path):
     app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: [])
     line = run_cycle(app)
     for field in ("frame=none", "age=n/a", "radar=skipped", "raining_now=0", "eta=none",
-                  "sources=none", "latched=0", "outcome=scope-offline", "note=no scope online"):
+                  "sources=none", "pirate=skipped", "latched=0", "outcome=scope-offline",
+                  "note=no scope online"):
         assert field in line, field
 
 

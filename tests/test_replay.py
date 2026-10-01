@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -44,12 +45,28 @@ def test_run_replay_reports_would_send(tmp_path, caplog):
     caplog.set_level(logging.INFO)
     save_sequence(tmp_path)
     cfg = load_config({**BASE, "REPLAY_DIR": str(tmp_path), "STATE_DIR": str(tmp_path / "unused"),
-                       "SCOPE_HOSTS": "10.0.0.5"})     # replay ignores the scope gate
+                       "SCOPE_HOSTS": "10.0.0.5",      # replay ignores the scope gate
+                       "POLL_SEC": "120"})
     n = run_replay(cfg, tmp_path)
     assert n == 4
     would = [r.getMessage() for r in caplog.records if r.getMessage().startswith("WOULD SEND")]
     assert len(would) == 1 and "Rain incoming" in would[0]
     assert not (tmp_path / "unused").exists()     # replay never touches the real state dir
+
+
+def test_run_replay_polls_at_poll_sec(tmp_path, caplog):
+    """#50: replay steps the clock like the live loop, so notification counts match it."""
+    caplog.set_level(logging.INFO)
+    save_sequence(tmp_path)                        # frames at 0, 2, 4, 6 minutes
+    cfg = load_config({**BASE, "REPLAY_DIR": str(tmp_path), "POLL_SEC": "180"})
+    n = run_replay(cfg, tmp_path)
+    assert n == 3                                  # cycles at 0, 3 and 6 minutes
+    lines = [r.getMessage() for r in caplog.records]
+    assert sum(1 for m in lines if m.startswith("WOULD SEND")) == 1
+    frames_used = [re.search(r"frame=(\d\d:\d\d:\d\d)Z", m).group(1)
+                   for m in lines if "outcome=" in m]
+    assert frames_used == ["20:00:00", "20:02:00", "20:06:00"]   # never a frame from the future
+    assert any("every 180 s" in m and "3 cycles" in m for m in lines)
 
 
 def test_dry_run_notifier(caplog):

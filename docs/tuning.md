@@ -29,10 +29,14 @@ set -a; . ./.env; set +a
 REPLAY_DIR=frames/ DIRECTION_FILTER=1 .venv/bin/python -m astrorainprotect
 ```
 
-Every distinct frame time is run through the real poll cycle with a throwaway
-latch. Pirate Weather is not called and the scope gate is bypassed. Each cycle
-prints the usual summary line, and alerts appear as `WOULD SEND <title>:
-<message>` instead of going to ntfy.
+The clock steps from the first frame to the last in `POLL_SEC` increments and
+each step runs the real poll cycle with a throwaway latch, so the frame history,
+repeats and the direction filter see what they would have seen live. Keep the
+production `POLL_SEC` when counting notifications; set `POLL_SEC=120` (the
+product cadence) to run every frame when working on the motion estimator.
+Pirate Weather is not called and the scope gate is bypassed. Each cycle prints
+the usual summary line, alerts appear as `WOULD SEND <title>: <message>` instead
+of going to ntfy, and the last line states the cycle count and cadence.
 
 ## What to compare
 

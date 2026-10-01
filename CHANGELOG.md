@@ -6,6 +6,9 @@ Keep a Changelog; versions follow SemVer.
 ## [Unreleased]
 
 ### Fixed
+- A repeat fires on the poll nearest to `REPEAT_MIN`, counting up to half a poll early as due.
+  With `REPEAT_MIN=10` and `POLL_SEC=300` the live container repeated every third poll (about
+  14.5 minutes) because its polls landed a few seconds short of 300 s (#53).
 - Storm motion is estimated on real storms. Phase correlation never reached its confidence
   threshold on the first recorded storm (motion unknown on 309 of 309 polls); it is replaced by
   normalised cross-correlation of the >= 20 dBZ echo masks of two reflectivity frames about

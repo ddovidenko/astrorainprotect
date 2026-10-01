@@ -124,7 +124,8 @@ tested:
   rains was dropped because it silenced cells that form in place over the house.
 - `REPEAT_MIN` (default 0): while a trigger stays active, re-send every N
   minutes with updated ETA/distance, title "Rain incoming (still)". Uses the
-  latch file's mtime as the timer.
+  latch file's mtime as the timer; due on the poll nearest to N minutes (up to
+  half a poll early), so a poll a few seconds short never slips it (#53).
 - `SCOPE_HOSTS`: comma-separated `host[:port]` (default port 4700, the Seestar
   JSON-RPC port). If set, skip all checks (and API/S3 fetches) unless at least
   one host counts as online. Reset the latch when none is online so each

@@ -10,9 +10,9 @@ PW = Trigger(source="pirate weather", eta_min=25.0, detail="prob 60%")
 RAINING = Trigger(source="house", eta_min=0.0, detail="0.3 mm/h")
 
 
-def inputs(triggers=(), latched=False, latch_age_sec=None, repeat_min=0):
+def inputs(triggers=(), latched=False, latch_age_sec=None, repeat_min=0, poll_sec=0):
     return AlarmInputs(triggers=tuple(triggers), latched=latched,
-                       latch_age_sec=latch_age_sec, repeat_min=repeat_min)
+                       latch_age_sec=latch_age_sec, repeat_min=repeat_min, poll_sec=poll_sec)
 
 
 def test_first_alert():
@@ -41,6 +41,24 @@ def test_repeat_exactly_at_interval():
 
 def test_no_repeat_before_interval():
     d = decide(inputs([RADAR], latched=True, latch_age_sec=599, repeat_min=10))
+    assert d.action is Action.SKIP
+
+
+def test_repeat_within_half_a_poll_of_the_interval():
+    """#53: polls landed 570 s apart in pairs, so the repeat slipped to the third poll."""
+    d = decide(inputs([RADAR], latched=True, latch_age_sec=570, repeat_min=10, poll_sec=300))
+    assert d.action is Action.REPEAT
+    d = decide(inputs([RADAR], latched=True, latch_age_sec=450, repeat_min=10, poll_sec=300))
+    assert d.action is Action.REPEAT              # exactly half a poll early still counts
+
+
+def test_no_repeat_more_than_half_a_poll_early():
+    d = decide(inputs([RADAR], latched=True, latch_age_sec=449, repeat_min=10, poll_sec=300))
+    assert d.action is Action.SKIP
+
+
+def test_repeat_tolerance_does_not_turn_repeat_off_into_on():
+    d = decide(inputs([RADAR], latched=True, latch_age_sec=99999, repeat_min=0, poll_sec=300))
     assert d.action is Action.SKIP
 
 

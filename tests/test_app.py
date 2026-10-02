@@ -478,6 +478,7 @@ def test_direction_filter_alerts_once_on_a_receding_storm_and_holds_repeats(tmp_
     assert app.notifier.sent[0][1].startswith("Rain nearby (moving away): radar: ")
     assert re.search(r"moving away, closest approach [\d.]+ km", app.notifier.sent[0][1])
     assert "note=reflectivity moving away (repeats held)" in line and "outcome=send" in line
+    assert "eta=none" in line and "eta " not in app.notifier.sent[0][1]   # receding: no ETA
     app.clock = lambda: NOW + timedelta(minutes=11)
     radar._hist = [moving_storm(k, toward=False, age_min=-11.0) for k in range(3)]
     radar.by_product["reflectivity"] = radar._hist[-1]
@@ -591,6 +592,19 @@ def test_direction_filter_uses_reflectivity_motion_when_only_preciprate_qualifie
     line = run_cycle(app)
     assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]
     assert "note=preciprate moving away (repeats held)" in line
+
+
+def test_direction_filter_error_falls_back_to_plain_alerting(tmp_path, monkeypatch, caplog):
+    """The filter is on by default now; a bug in it must cost an ETA, never the alert."""
+    import astrorainprotect.app as appmod
+    caplog.set_level(logging.ERROR)
+    monkeypatch.setattr(appmod, "estimate", lambda frames: 1 / 0)
+    radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)])
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    line = run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]
+    assert "note=motion unknown (filter error)" in line and "outcome=send" in line
+    assert any("direction filter failed" in r.getMessage() for r in caplog.records)
 
 
 def test_direction_filter_off_ignores_motion(tmp_path):

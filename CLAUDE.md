@@ -98,7 +98,8 @@ Given the subset grid and its lat/lon coordinates:
    (moving away)"), but repeats are held and the latch stays set until a cell
    is projected to hit, rain reaches the house, or Pirate Weather fires (#48).
    The filter never drops an alert; suppression was tried and dropped 40
-   minutes of a real approach because new cells formed on the near side. Motion comes from cross-correlating the >= 20 dBZ echo
+   minutes of a real approach because new cells formed on the near side.
+   Motion comes from cross-correlating the >= 20 dBZ echo
    masks of two reflectivity frames about 20 minutes apart (8 to 30 allowed,
    chosen by time), whichever product qualified (#47); shifts under 2 cells,
    correlation under 0.3, fewer than 30 echo cells, a match no better than

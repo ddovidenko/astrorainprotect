@@ -194,9 +194,9 @@ Each poll cycle ends with one summary line, for example:
 - `outcome` — what the cycle actually did: `send`, `repeat`, `skip`, `re-armed`,
   `none`, `send-failed`, or `scope-offline` (no scope answered, so nothing was
   checked; the line then shows `radar=skipped`).
-- `note` — `-` normally, `reflectivity moving away`, `preciprate moving away`
-  or `reflectivity+preciprate moving away` when the direction filter dropped
-  the radar echo this cycle, `motion unknown (...)` when it could not
+- `note` — `-` normally, `reflectivity moving away (repeats held)` (or
+  `preciprate ...`, `reflectivity+preciprate ...`) when the direction filter
+  found every echo receding, `motion unknown (...)` when it could not
   estimate motion and alerted on plain radius, or `no scope online (...)` on the
   scope-offline path.
 
@@ -213,7 +213,8 @@ qualifying cell is projected, so a broad line moving crosswise alerts as soon
 as any part of it is headed for the site, with the ETA of the earliest part.
 On the first recorded storm it cut 31 notifications to 13 without losing or
 delaying any first alert (#48). `DIRECTION_FILTER=0` turns it off; with the
-default `REPEAT_MIN=0` the filter only affects the message text.
+default `REPEAT_MIN=0` the filter changes no decision, only the message, the
+summary line's `eta=` and `note=` fields and the snapshot's motion arrow.
 
 To tune without waiting for the next storm, record a stretch of radar frames
 during one and replay them through the detector as often as you like, with

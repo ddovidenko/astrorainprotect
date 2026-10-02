@@ -112,6 +112,63 @@ def _product_state(product: str, d: Detection | None) -> str:
     return f"{product} none in range"
 
 
+def _direction_filter(app: App, hits: list[Detection], dets: list[Detection],
+                      now: datetime) -> tuple[float | None, bool, str]:
+    """(eta_min, receding, detail suffix) for the qualifying detections. Sets app.last_motion
+    and app.last_note; raises nothing the caller is expected to understand."""
+    cfg = app.cfg
+    eta: float | None = None
+    receding = False
+    suffix = ""
+    # Motion comes from the reflectivity field across the whole box, whichever product
+    # qualified inside the radius (#47).
+    # The cache outlives a failed fetch, so motion is only trusted when reflectivity
+    # was fetched and usable this poll and its newest frame is recent.
+    refl_frames = app.radar.frames("reflectivity")
+    if (any(d.product == "reflectivity" for d in dets) and refl_frames
+            and now - refl_frames[-1].valid_time <= MOTION_MAX_AGE):
+        m, unknown = estimate(refl_frames)
+    else:
+        m, unknown = None, "no current reflectivity"
+    app.last_motion = m
+    if m is not None:
+        # Project every qualifying cell of every product; any one entering the circle is
+        # enough, and the ETA is the earliest entry (#11).
+        hit_radius = max(cfg.now_radius_km, cfg.alert_radius_km / 4)
+        approaches = [
+            (project(d, m, hit_radius_km=hit_radius, lookahead_min=cfg.lookahead_min), d)
+            for d in hits]
+        hitting = [ad for ad in approaches if ad[0].will_hit]
+        if hitting:
+            a, d = min(hitting, key=lambda ad: ad[0].eta_min or 0.0)
+        else:
+            a, d = min(approaches, key=lambda ad: ad[0].closest_km)
+        if not a.will_hit:
+            # #48: the alert still goes out; the receding flag only holds repeats.
+            log.info(
+                "radar echo moving away (closest approach %.1f km, motion %.1f/%.1f "
+                "km/min, conf %.2f); holding repeats",
+                a.closest_km, m.u_km_per_min, m.v_km_per_min, m.confidence,
+            )
+            app.last_note = f"{'+'.join(d.product for d in hits)} moving away (repeats held)"
+            suffix += f"; moving away, closest approach {a.closest_km:.1f} km"
+            receding = True
+        else:
+            # The projection runs from the valid time of the frame the echo was found in;
+            # count down that frame's age so the message says how long from now. will_hit
+            # above stays on the raw projection.
+            age_min = (now - app.radar.frames(d.product)[-1].valid_time).total_seconds() / 60
+            eta = max(0.0, (a.eta_min or 0.0) - age_min)
+            if eta >= 0.5:  # below that the headline already says "arriving now" (#32)
+                suffix += f", eta {eta:.0f} min"
+    else:
+        app.last_note = f"motion unknown ({unknown})"
+        if cfg.debug >= 1:
+            log.info("DEBUG direction filter: motion unknown (%s), plain radius alerting",
+                     unknown)
+    return eta, receding, suffix
+
+
 def radar_trigger(app: App, products: Mapping[str, Detection | None],
                   now: datetime) -> Trigger | None:
     """Build the radar Trigger from qualifying detections, applying the direction filter.
@@ -132,52 +189,12 @@ def radar_trigger(app: App, products: Mapping[str, Detection | None],
     eta: float | None = None
     receding = False
     if cfg.direction_filter:
-        # Motion comes from the reflectivity field across the whole box, whichever product
-        # qualified inside the radius (#47).
-        # The cache outlives a failed fetch, so motion is only trusted when reflectivity
-        # was fetched and usable this poll and its newest frame is recent.
-        refl_frames = app.radar.frames("reflectivity")
-        if (any(d.product == "reflectivity" for d in dets) and refl_frames
-                and now - refl_frames[-1].valid_time <= MOTION_MAX_AGE):
-            m, unknown = estimate(refl_frames)
-        else:
-            m, unknown = None, "no current reflectivity"
-        app.last_motion = m
-        if m is not None:
-            # Project every qualifying cell of every product; any one entering the circle is
-            # enough, and the ETA is the earliest entry (#11).
-            hit_radius = max(cfg.now_radius_km, cfg.alert_radius_km / 4)
-            approaches = [
-                (project(d, m, hit_radius_km=hit_radius, lookahead_min=cfg.lookahead_min), d)
-                for d in hits]
-            hitting = [ad for ad in approaches if ad[0].will_hit]
-            if hitting:
-                a, d = min(hitting, key=lambda ad: ad[0].eta_min or 0.0)
-            else:
-                a, d = min(approaches, key=lambda ad: ad[0].closest_km)
-            if not a.will_hit:
-                # #48: the alert still goes out; the receding flag only holds repeats.
-                log.info(
-                    "radar echo moving away (closest approach %.1f km, motion %.1f/%.1f "
-                    "km/min, conf %.2f); holding repeats",
-                    a.closest_km, m.u_km_per_min, m.v_km_per_min, m.confidence,
-                )
-                app.last_note = f"{'+'.join(d.product for d in hits)} moving away (repeats held)"
-                detail += f"; moving away, closest approach {a.closest_km:.1f} km"
-                receding = True
-            else:
-                # The projection runs from the valid time of the frame the echo was found in;
-                # count down that frame's age so the message says how long from now. will_hit
-                # above stays on the raw projection.
-                age_min = (now - app.radar.frames(d.product)[-1].valid_time).total_seconds() / 60
-                eta = max(0.0, (a.eta_min or 0.0) - age_min)
-                if eta >= 0.5:  # below that the headline already says "arriving now" (#32)
-                    detail += f", eta {eta:.0f} min"
-        else:
-            app.last_note = f"motion unknown ({unknown})"
-            if cfg.debug >= 1:
-                log.info("DEBUG direction filter: motion unknown (%s), plain radius alerting",
-                         unknown)
+        try:
+            eta, receding, suffix = _direction_filter(app, hits, dets, now)
+            detail += suffix
+        except Exception:   # the filter may cost an ETA, never the alert
+            log.exception("direction filter failed; plain radius alerting")
+            app.last_motion, app.last_note = None, "motion unknown (filter error)"
     return Trigger(source="radar", eta_min=eta, detail=detail, receding=receding)
 
 

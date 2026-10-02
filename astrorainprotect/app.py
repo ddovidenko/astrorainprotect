@@ -115,7 +115,7 @@ def _product_state(product: str, d: Detection | None) -> str:
 def _direction_filter(app: App, hits: list[Detection], dets: list[Detection],
                       now: datetime) -> tuple[float | None, bool, str]:
     """(eta_min, receding, detail suffix) for the qualifying detections. Sets app.last_motion
-    and app.last_note; raises nothing the caller is expected to understand."""
+    and app.last_note. The caller treats any exception as unknown motion."""
     cfg = app.cfg
     eta: float | None = None
     receding = False

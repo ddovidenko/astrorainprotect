@@ -21,7 +21,7 @@ def test_defaults():
     assert cfg.min_dbz == 30.0
     assert cfg.min_cells == 3
     assert cfg.raining_now == 0.05
-    assert cfg.direction_filter is False
+    assert cfg.direction_filter is True      # #48: holds repeats only, safe by default
     assert cfg.lookahead_min == 60
     assert cfg.repeat_min == 0
     assert cfg.scope_hosts == ""

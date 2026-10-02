@@ -20,10 +20,17 @@ Keep a Changelog; versions follow SemVer.
   about as well without moving (a decaying echo). Motion is now estimated whichever product
   qualified, the ETA counts from the frame the echo was found in, and the frame cache holds 16
   frames per product. Replaying the same recording with the site's settings, motion is unknown
-  on 44 polls, 37 of them a decaying echo with no clear shift. `DIRECTION_FILTER` stays
-  off by default (#47, #48).
+  on 44 polls, 37 of them a decaying echo with no clear shift (#47).
 
 ### Changed
+- `DIRECTION_FILTER=1` no longer drops the radar trigger for echoes moving away: the first
+  alert always goes out, headed "Rain nearby (moving away)" with the closest approach in the
+  detail, and only repeats are held while every active trigger recedes. The latch stays set, so
+  a storm that turns back produces a repeat, not a fresh alert. Rain at the house and Pirate
+  Weather are never held. With that the filter is on by default (`.env.example`, stack file);
+  with the default `REPEAT_MIN=0` it changes no decision, only the message and the summary
+  line's `eta=` and `note=` fields. On the
+  recorded storms it cut 31 notifications to 13 and 7 to 2 with no first alert lost (#48).
 - The radar detail in an alert names both products every time, qualifying ones first, the other
   with its state: `reflectivity 28 dBZ, 1 cell, below threshold`, `reflectivity 18 dBZ, under
   threshold`, `reflectivity none in range` or `reflectivity no data`. Products are separated by
@@ -33,7 +40,7 @@ Keep a Changelog; versions follow SemVer.
   frame (#50).
 - With `DIRECTION_FILTER=1` the summary line says why motion is unknown
   (`note=motion unknown (<reason>)`; the README lists the reasons), and the "moving away"
-  note names every product that was dropped (#47).
+  note names every product concerned (#47).
 - Project brief and design spec describe the site generically; CONTRIBUTING asks the same of
   future docs, commits, issues and pull requests.
 - CONTRIBUTING.md gains sections on private data that must never be committed and on commit

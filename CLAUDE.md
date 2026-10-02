@@ -90,22 +90,23 @@ Given the subset grid and its lat/lon coordinates:
    `MIN_INTENSITY` mm/h (default 0.2) — or reflectivity ≥ `MIN_DBZ` if using
    the reflectivity product. Require a minimum number of qualifying cells
    (`MIN_CELLS`, default 3) so a single noisy pixel doesn't trigger.
-4. **Approach filter (optional, `DIRECTION_FILTER=1`)**: compare the qualifying
-   echoes in the current frame with the same echoes 2–3 frames earlier (e.g.
-   via centroid displacement, or a coarse cross-correlation of the box). Derive
-   a motion vector; project every qualifying cell forward (#11); alert only if
-   any cell's path enters the hit radius (`max(NOW_RADIUS_KM,
-   ALERT_RADIUS_KM / 4)`) in the next `LOOKAHEAD_MIN` minutes, with the ETA of
-   the earliest one. Motion comes from cross-correlating the >= 20 dBZ echo
+4. **Approach filter (`DIRECTION_FILTER=1`, the default)**: derive a motion
+   vector and project every qualifying cell forward (#11). If any cell's path
+   enters the hit radius (`max(NOW_RADIUS_KM, ALERT_RADIUS_KM / 4)`) in the
+   next `LOOKAHEAD_MIN` minutes, report the ETA of the earliest one. If none
+   does, the echo is receding: the first alert still goes out ("Rain nearby
+   (moving away)"), but repeats are held and the latch stays set until a cell
+   is projected to hit, rain reaches the house, or Pirate Weather fires (#48).
+   The filter never drops an alert; suppression was tried and dropped 40
+   minutes of a real approach because new cells formed on the near side.
+   Motion comes from cross-correlating the >= 20 dBZ echo
    masks of two reflectivity frames about 20 minutes apart (8 to 30 allowed,
    chosen by time), whichever product qualified (#47); shifts under 2 cells,
    correlation under 0.3, fewer than 30 echo cells, a match no better than
    standing still, coverage gaps, or reflectivity not fetched this poll all
    count as unknown motion.
    If motion cannot be estimated (new cell, too little history), fall back to
-   plain radius alerting — never suppress an alert because the filter lacks
-   data. Known weakness: the projection drops alerts during an approach with
-   new cell growth (#48), so the filter stays off.
+   plain radius alerting — never hold anything because the filter lacks data.
 5. Report an ETA (minutes) when motion is known; otherwise report distance and
    bearing ("rain 12 km to the SW").
 
@@ -126,6 +127,7 @@ tested:
   minutes with updated ETA/distance, title "Rain incoming (still)". Uses the
   latch file's mtime as the timer; due on the poll nearest to N minutes (up to
   half a poll early), so a poll a few seconds short never slips it (#53).
+  Held while every active trigger is receding (#48).
 - `SCOPE_HOSTS`: comma-separated `host[:port]` (default port 4700, the Seestar
   JSON-RPC port). If set, skip all checks (and API/S3 fetches) unless at least
   one host counts as online. Reset the latch when none is online so each
@@ -180,7 +182,7 @@ variables carry over.
 | `MIN_DBZ` | 30 | dBZ for a reflectivity cell to count |
 | `MIN_CELLS` | 3 | qualifying cells needed |
 | `RAINING_NOW` | 0.05 | mm/h at the house = already raining |
-| `DIRECTION_FILTER` | 0 | 1 = ignore echoes moving away |
+| `DIRECTION_FILTER` | 1 | 1 = hold repeats for echoes moving away, ETA when known |
 | `LOOKAHEAD_MIN` | 60 | horizon for approach projection and Pirate Weather |
 | `REPEAT_MIN` | 0 | repeat interval while active |
 | `SCOPE_HOSTS` | empty | scope-online gate |
@@ -273,5 +275,4 @@ variables carry over.
 - Query Seestar imaging state via seestar_alp / seestarpy instead of a TCP
   reachability check (new firmware requires an extracted PEM for auth).
 - Per-product motion estimation, or reflectivity-only projection (#40).
-- Direction filter that holds back repeats instead of dropping the alert (#48).
 - Second topic with quieter daytime thresholds.

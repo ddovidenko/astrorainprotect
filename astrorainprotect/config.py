@@ -32,7 +32,7 @@ class Config:
     min_dbz: float = 30.0
     min_cells: int = 3
     raining_now: float = 0.05
-    direction_filter: bool = False
+    direction_filter: bool = True
     lookahead_min: int = 60
     repeat_min: int = 0
     scope_hosts: str = ""
@@ -106,7 +106,7 @@ def load_config(env: Mapping[str, str]) -> Config:
         min_dbz=_float(env, "MIN_DBZ", 30.0, 0.0, 80.0),
         min_cells=_int(env, "MIN_CELLS", 3, 1, 1000),
         raining_now=_float(env, "RAINING_NOW", 0.05, 0.0, 100.0),
-        direction_filter=_int(env, "DIRECTION_FILTER", 0, 0, 1) == 1,
+        direction_filter=_int(env, "DIRECTION_FILTER", 1, 0, 1) == 1,
         lookahead_min=_int(env, "LOOKAHEAD_MIN", 60, 1, 60),
         repeat_min=_int(env, "REPEAT_MIN", 0, 0, 1440),
         scope_hosts=_str(env, "SCOPE_HOSTS"),

@@ -66,7 +66,7 @@ Legacy names preserved; new vars marked.
 | `MIN_DBZ` (new) | 30 | dBZ for a reflectivity cell to count |
 | `MIN_CELLS` | 3 | qualifying cells needed |
 | `RAINING_NOW` | 0.05 | mm/h at the site = already raining |
-| `DIRECTION_FILTER` | 0 | 1 = ignore echoes moving away |
+| `DIRECTION_FILTER` | 1 | 1 = hold repeats for echoes moving away; alerts carry an ETA |
 | `LOOKAHEAD_MIN` | 60 | projection horizon, also Pirate Weather window |
 | `REPEAT_MIN` | 0 | repeat interval while active |
 | `SCOPE_HOSTS` | empty | scope-online gate; 5 s connect timeout, one retry, offline only after two missed polls |
@@ -142,13 +142,17 @@ script):
 - **Direction filter**: with `DIRECTION_FILTER=1`, storm motion is estimated
   by cross-correlating the echo (>= 20 dBZ) in the newest reflectivity frame
   with the frame about 20 minutes earlier, and every qualifying echo is
-  projected along it. If its projected path does not come within
+  projected along it. If no path comes within
   `max(NOW_RADIUS_KM, ALERT_RADIUS_KM / 4)` of the site inside `LOOKAHEAD_MIN`,
-  the radar trigger is dropped for that cycle (the summary line shows
-  `note=... moving away`, naming the products that were dropped:
-  `reflectivity`, `preciprate` or `reflectivity+preciprate`). When it will hit, the alert carries an ETA, counted
-  down by the age of the newest frame. When motion is unknown, the filter never
-  suppresses: plain radius alerting applies, and the summary line says why:
+  the echo counts as receding: the first alert still goes out, headed
+  "Rain nearby (moving away)" with the closest approach in the detail, but
+  while every active trigger recedes no repeats are sent and the latch stays
+  set (the summary line shows `note=... moving away (repeats held)`, naming
+  the products: `reflectivity`, `preciprate` or `reflectivity+preciprate`).
+  Repeats resume, with an ETA, as soon as any cell is projected to hit; rain
+  at the site and Pirate Weather are never held. When it will hit, the alert
+  carries an ETA, counted down by the age of the newest frame. When motion is
+  unknown, plain radius alerting applies and the summary line says why:
   `note=motion unknown (no baseline)` (less than 8 minutes of gap-free
   history, or a gap over 30), `(no current reflectivity)` (reflectivity was
   not fetched this poll or is over 10 minutes old), `(radar gaps)` (over 10%
@@ -190,9 +194,9 @@ Each poll cycle ends with one summary line, for example:
 - `outcome` — what the cycle actually did: `send`, `repeat`, `skip`, `re-armed`,
   `none`, `send-failed`, or `scope-offline` (no scope answered, so nothing was
   checked; the line then shows `radar=skipped`).
-- `note` — `-` normally, `reflectivity moving away`, `preciprate moving away`
-  or `reflectivity+preciprate moving away` when the direction filter dropped
-  the radar echo this cycle, `motion unknown (...)` when it could not
+- `note` — `-` normally, `reflectivity moving away (repeats held)` (or
+  `preciprate ...`, `reflectivity+preciprate ...`) when the direction filter
+  found every echo receding, `motion unknown (...)` when it could not
   estimate motion and alerted on plain radius, or `no scope online (...)` on the
   scope-offline path.
 
@@ -201,14 +205,16 @@ Each poll cycle ends with one summary line, for example:
 Start with the defaults. If alerts feel late, lower `MIN_DBZ` to `25` for
 earlier — but noisier — alerts. If single-pixel radar noise is triggering false
 alarms, raise `MIN_CELLS`. During an imaging session where you want a reminder
-that rain is still active, set `REPEAT_MIN=10`. Set `DIRECTION_FILTER=1` to
-estimate storm motion from reflectivity frames and stop alerting
-on echoes that are moving away from the site; the alert includes an ETA when
-motion is known. Every qualifying cell is projected, so a broad line moving
-crosswise alerts as soon as any part of it is headed for the site, with the
-ETA of the earliest part. Leave the filter off: on the first recorded
-storm it dropped the alert for 40 minutes of a real approach, because new cells
-kept forming on the side facing the site (#48).
+that rain is still active, set `REPEAT_MIN=10`. The direction filter (on by
+default) estimates storm motion from reflectivity frames, adds an ETA when
+motion is known, and holds repeats while every echo is moving away from the
+site; it never holds a first alert, rain at the site or Pirate Weather. Every
+qualifying cell is projected, so a broad line moving crosswise alerts as soon
+as any part of it is headed for the site, with the ETA of the earliest part.
+On the first recorded storm it cut 31 notifications to 13 without losing or
+delaying any first alert (#48). `DIRECTION_FILTER=0` turns it off; with the
+default `REPEAT_MIN=0` the filter changes no decision, only the message, the
+summary line's `eta=` and `note=` fields and the snapshot's motion arrow.
 
 To tune without waiting for the next storm, record a stretch of radar frames
 during one and replay them through the detector as often as you like, with

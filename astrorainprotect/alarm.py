@@ -19,6 +19,7 @@ class Trigger:
     source: str            # "radar" or "pirate weather"
     eta_min: float | None  # minutes until rain, when known
     detail: str            # human text for the message body
+    receding: bool = False  # every projected cell misses the site: hold repeats (#48)
 
 
 @dataclass(frozen=True)
@@ -55,11 +56,13 @@ def compose_message(triggers: tuple[Trigger, ...]) -> str:
     if house is not None:
         head = f"Currently raining at the house ({house.detail})"
         return f"{head}; {sources}" if sources else head
-    etas = [t.eta_min for t in others if t.eta_min is not None]
+    etas = [t.eta_min for t in others if t.eta_min is not None and not t.receding]
     if etas and min(etas) < 0.5:
         return f"Rain arriving now ({sources})"
     if etas:
         return f"Rain expected in about {round(min(etas))} min ({sources})"
+    if others and all(t.receding for t in others):
+        return f"Rain nearby (moving away): {sources}"
     return f"Rain nearby: {sources}"
 
 
@@ -72,6 +75,8 @@ def decide(inputs: AlarmInputs) -> Decision:
         if not inputs.latched:
             title = TITLE_RAINING if raining else TITLE_FIRST
             return Decision(Action.SEND, title, compose_message(active))
+        if all(t.receding for t in active):
+            return Decision(Action.SKIP)   # #48: the echo is still there, so stay latched
         age = inputs.latch_age_sec
         # Polls land a few seconds either side of the interval, so fire on the nearest poll
         # rather than slipping a whole poll when the clock is a few seconds short (#53).

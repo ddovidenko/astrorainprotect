@@ -24,6 +24,13 @@ Keep a Changelog; versions follow SemVer.
   off by default (#47, #48).
 
 ### Changed
+- `DIRECTION_FILTER=1` no longer drops the radar trigger for echoes moving away: the first
+  alert always goes out, headed "Rain nearby (moving away)" with the closest approach in the
+  detail, and only repeats are held while every active trigger recedes. The latch stays set, so
+  a storm that turns back produces a repeat, not a fresh alert. Rain at the house and Pirate
+  Weather are never held. With that the filter is on by default (`.env.example`, stack file);
+  with the default `REPEAT_MIN=0` it only adds the ETA or "moving away" to the message. On the
+  recorded storms it cut 31 notifications to 13 and 7 to 2 with no first alert lost (#48).
 - The radar detail in an alert names both products every time, qualifying ones first, the other
   with its state: `reflectivity 28 dBZ, 1 cell, below threshold`, `reflectivity 18 dBZ, under
   threshold`, `reflectivity none in range` or `reflectivity no data`. Products are separated by

@@ -469,12 +469,33 @@ class HistoryRadar(FakeRadar):
         return self._hist if product == "reflectivity" else [self.by_product["preciprate"]]
 
 
-def test_direction_filter_suppresses_receding_storm(tmp_path):
+def test_direction_filter_alerts_once_on_a_receding_storm_and_holds_repeats(tmp_path):
+    """#48: the first alert always goes out; while the storm recedes, repeats are held."""
     radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)])
-    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1", "REPEAT_MIN": "10"}, radar=radar)
     line = run_cycle(app)
-    assert app.notifier.sent == []
-    assert "moving away" in line
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]
+    assert app.notifier.sent[0][1].startswith("Rain nearby (moving away): radar: ")
+    assert re.search(r"moving away, closest approach [\d.]+ km", app.notifier.sent[0][1])
+    assert "note=reflectivity moving away (repeats held)" in line and "outcome=send" in line
+    app.clock = lambda: NOW + timedelta(minutes=11)
+    radar._hist = [moving_storm(k, toward=False, age_min=-11.0) for k in range(3)]
+    radar.by_product["reflectivity"] = radar._hist[-1]
+    line = run_cycle(app)
+    assert len(app.notifier.sent) == 1 and "outcome=skip" in line and app.state.latched()
+
+
+def test_repeat_resumes_without_a_fresh_alert_when_the_storm_turns(tmp_path):
+    """#48: suppression used to re-arm the latch, so every flip sent "Rain incoming" again."""
+    radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)])
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1", "REPEAT_MIN": "10"}, radar=radar)
+    run_cycle(app)
+    app.clock = lambda: NOW + timedelta(minutes=11)
+    radar._hist = [moving_storm(k, toward=True, age_min=-11.0) for k in range(3)]
+    radar.by_product["reflectivity"] = radar._hist[-1]
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming", "Rain incoming (still)"]
+    assert app.notifier.sent[1][1].startswith("Rain expected in about")
 
 
 def test_direction_filter_alerts_with_eta_for_approaching_storm(tmp_path):
@@ -568,13 +589,13 @@ def test_direction_filter_uses_reflectivity_motion_when_only_preciprate_qualifie
     app = build(tmp_path, env={"DIRECTION_FILTER": "1"},
                 radar=HistoryRadar(frames, preciprate=precip))
     line = run_cycle(app)
-    assert app.notifier.sent == []
-    assert "note=preciprate moving away" in line
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"]
+    assert "note=preciprate moving away (repeats held)" in line
 
 
 def test_direction_filter_off_ignores_motion(tmp_path):
     radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)])
-    app = build(tmp_path, radar=radar)
+    app = build(tmp_path, env={"DIRECTION_FILTER": "0"}, radar=radar)
     run_cycle(app)
     assert len(app.notifier.sent) == 1
 
@@ -719,13 +740,22 @@ def test_scope_offline_summary_line_has_full_field_set(tmp_path):
         assert field in line, field
 
 
-def test_direction_filter_note_names_reflectivity(tmp_path):
-    """Issue #19: the note says what moved away, so it reads right next to outcome=send."""
+def test_rain_at_the_house_repeats_even_while_the_radar_echo_recedes(tmp_path):
+    """Issue #19 / #48: the note says what moved away; the house trigger is never held."""
     radar = HistoryRadar([moving_storm(k, toward=False) for k in range(3)],
                          preciprate=raining("preciprate", 1.0))
-    app = build(tmp_path, env={"DIRECTION_FILTER": "1"}, radar=radar)
+    app = build(tmp_path, env={"DIRECTION_FILTER": "1", "REPEAT_MIN": "10"}, radar=radar)
     line = run_cycle(app)
-    assert "note=reflectivity moving away" in line and "outcome=send" in line
+    assert "note=reflectivity moving away (repeats held)" in line and "outcome=send" in line
+    assert app.notifier.sent[0][0] == "Currently raining"
+    app.clock = lambda: NOW + timedelta(minutes=11)
+    radar._hist = [moving_storm(k, toward=False, age_min=-11.0) for k in range(3)]
+    radar.by_product["reflectivity"] = radar._hist[-1]
+    radar.by_product["preciprate"] = make_frame(raining("preciprate", 1.0).values,
+                                                product="preciprate",
+                                                valid_time=NOW + timedelta(minutes=9))
+    run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Currently raining", "Currently raining (still)"]
 
 
 def test_module_entry_does_not_read_debug(tmp_path):

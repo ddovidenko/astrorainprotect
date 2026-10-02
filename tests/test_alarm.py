@@ -8,6 +8,8 @@ PW = Trigger(source="pirate weather", eta_min=25.0, detail="prob 60%")
 
 
 RAINING = Trigger(source="house", eta_min=0.0, detail="0.3 mm/h")
+AWAY = Trigger(source="radar", eta_min=None, detail="reflectivity 41 dBZ 8.2 km to the SW; "
+               "moving away, closest approach 12.0 km", receding=True)
 
 
 def inputs(triggers=(), latched=False, latch_age_sec=None, repeat_min=0, poll_sec=0):
@@ -131,3 +133,30 @@ def test_eta_under_half_minute_reads_arriving_now():
     d = decide(inputs([t]))
     assert d.title == "Rain incoming"
     assert d.message == "Rain arriving now (radar: reflectivity 41 dBZ, 3.0 km to the W)"
+
+
+def test_receding_storm_still_sends_the_first_alert():
+    """#48: the projection may hold repeats but never the first alert."""
+    d = decide(inputs([AWAY]))
+    assert d.action is Action.SEND
+    assert d.title == "Rain incoming"
+    assert d.message.startswith("Rain nearby (moving away): radar: ")
+    assert "closest approach 12.0 km" in d.message
+
+
+def test_receding_storm_holds_the_repeat():
+    d = decide(inputs([AWAY], latched=True, latch_age_sec=900, repeat_min=10, poll_sec=300))
+    assert d.action is Action.SKIP
+
+
+def test_repeat_resumes_when_any_trigger_is_not_receding():
+    d = decide(inputs([AWAY, PW], latched=True, latch_age_sec=900, repeat_min=10, poll_sec=300))
+    assert d.action is Action.REPEAT
+    assert d.message.startswith("Rain expected in about 25 min")
+    d = decide(inputs([AWAY, RAINING], latched=True, latch_age_sec=900, repeat_min=10))
+    assert d.action is Action.REPEAT and d.title == "Currently raining (still)"
+
+
+def test_receding_storm_keeps_the_latch():
+    d = decide(inputs([AWAY], latched=True, latch_age_sec=60, repeat_min=0))
+    assert d.action is Action.SKIP          # not REARM: the echo is still there

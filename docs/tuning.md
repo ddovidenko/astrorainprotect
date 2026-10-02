@@ -45,10 +45,11 @@ Run the same folder with different settings and note when the first
 
 - `MIN_DBZ` 25 vs 30: earlier alerts versus alerts for cells that never arrive.
 - `MIN_CELLS`, `ALERT_RADIUS_KM`: lead time versus false alarms.
-- `DIRECTION_FILTER=1`: how often the summary shows `note=motion unknown (...)`
-  (plain alerting used; the reason is in the brackets) and whether any cycle
-  shows a `moving away` note (grep for that; the products dropped are named
-  before it) for a storm that did reach you. That last case is the one to watch for; if it
-  happens on your data, keep the filter off.
+- `DIRECTION_FILTER` (on by default): how often the summary shows
+  `note=motion unknown (...)` (plain alerting; the reason is in the brackets),
+  and how many repeats a `moving away (repeats held)` note saves on a storm
+  that passed, against how many it holds on a storm that did reach you. The
+  filter never holds a first alert or the house trigger, so the cost of a
+  wrong "moving away" is one missing repeat.
 
 Worked examples from real captures will be added here.

@@ -130,6 +130,7 @@ def radar_trigger(app: App, products: Mapping[str, Detection | None],
         + [_product_state(p, d) for p, d in products.items() if d is None or not d.nearby]
     )
     eta: float | None = None
+    receding = False
     if cfg.direction_filter:
         # Motion comes from the reflectivity field across the whole box, whichever product
         # qualified inside the radius (#47).
@@ -155,26 +156,29 @@ def radar_trigger(app: App, products: Mapping[str, Detection | None],
             else:
                 a, d = min(approaches, key=lambda ad: ad[0].closest_km)
             if not a.will_hit:
+                # #48: the alert still goes out; the receding flag only holds repeats.
                 log.info(
                     "radar echo moving away (closest approach %.1f km, motion %.1f/%.1f "
-                    "km/min, conf %.2f); not alerting",
+                    "km/min, conf %.2f); holding repeats",
                     a.closest_km, m.u_km_per_min, m.v_km_per_min, m.confidence,
                 )
-                app.last_note = f"{'+'.join(d.product for d in hits)} moving away"
-                return None
-            # The projection runs from the valid time of the frame the echo was found in;
-            # count down that frame's age so the message says how long from now. will_hit
-            # above stays on the raw projection.
-            age_min = (now - app.radar.frames(d.product)[-1].valid_time).total_seconds() / 60
-            eta = max(0.0, (a.eta_min or 0.0) - age_min)
-            if eta >= 0.5:  # below that the headline already says "arriving now" (#32)
-                detail += f", eta {eta:.0f} min"
+                app.last_note = f"{'+'.join(d.product for d in hits)} moving away (repeats held)"
+                detail += f"; moving away, closest approach {a.closest_km:.1f} km"
+                receding = True
+            else:
+                # The projection runs from the valid time of the frame the echo was found in;
+                # count down that frame's age so the message says how long from now. will_hit
+                # above stays on the raw projection.
+                age_min = (now - app.radar.frames(d.product)[-1].valid_time).total_seconds() / 60
+                eta = max(0.0, (a.eta_min or 0.0) - age_min)
+                if eta >= 0.5:  # below that the headline already says "arriving now" (#32)
+                    detail += f", eta {eta:.0f} min"
         else:
             app.last_note = f"motion unknown ({unknown})"
             if cfg.debug >= 1:
                 log.info("DEBUG direction filter: motion unknown (%s), plain radius alerting",
                          unknown)
-    return Trigger(source="radar", eta_min=eta, detail=detail)
+    return Trigger(source="radar", eta_min=eta, detail=detail, receding=receding)
 
 
 def _scope_status(cfg: Config, online: list[str] | None) -> str:

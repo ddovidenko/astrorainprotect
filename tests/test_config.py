@@ -14,6 +14,7 @@ def test_defaults():
     assert cfg.ntfy_priority == "high"
     assert cfg.debug == 0
     assert cfg.snapshot is True
+    assert cfg.auto_record is True
     assert cfg.poll_sec == 180
     assert cfg.alert_radius_km == 20.0
     assert cfg.now_radius_km == 1.0

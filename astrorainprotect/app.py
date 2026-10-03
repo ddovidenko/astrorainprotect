@@ -23,6 +23,7 @@ from astrorainprotect.motion import Motion, estimate, project
 from astrorainprotect.mrms import PRODUCTS, MrmsError, RadarSource
 from astrorainprotect.notify import Notifier
 from astrorainprotect.pirate import PirateError, PirateSource
+from astrorainprotect.recorder import Recorder
 from astrorainprotect.scope import parse_hosts, probe_hosts
 from astrorainprotect.snapshot import render
 from astrorainprotect.state import State
@@ -68,6 +69,7 @@ class App:
     scope_misses: dict[str, int] | None = None   # consecutive missed polls per host
     scope_seen: set[str] | None = None           # hosts counted online after the last poll
     pirate_down_announced: bool = False          # one "unavailable" per outage (#51)
+    recorder: Recorder | None = None             # saves the frames behind an alert (#57)
 
     def __post_init__(self) -> None:
         if self.failures is None:
@@ -388,6 +390,8 @@ def run_cycle(app: App) -> str:
     if online is not None:
         if not online:
             app.state.clear_latch()
+            if app.recorder is not None:
+                app.recorder.close("scope gate closed")
             line = (f"frame=none age=n/a radar=skipped raining_now=0 eta=none sources=none "
                     f"pirate=skipped latched=0 outcome=scope-offline "
                     f"note=no scope online ({cfg.scope_hosts})")
@@ -492,6 +496,10 @@ def run_cycle(app: App) -> str:
         app.state.clear_latch()
         outcome = "re-armed"
 
+    if app.recorder is not None:
+        cached = [f for p in PRODUCTS for f in app.radar.frames(p)]
+        app.recorder.update(now, outcome, cached)
+
     frame_txt = "none"
     age_txt = "n/a"
     if newest is not None:
@@ -534,6 +542,7 @@ def build_app(cfg: Config) -> App:
         radar=RadarSource(client, cfg.lat, cfg.lon),
         notifier=Notifier(client, cfg.ntfy_url, cfg.ntfy_token, cfg.ntfy_priority),
         state=State(cfg.state_dir),
+        recorder=Recorder(Path(cfg.state_dir) / "recordings") if cfg.auto_record else None,
         scope_check=scope_check,
         pirate=(PirateSource(client, cfg.pw_key, cfg.lat, cfg.lon, lookahead_min=cfg.lookahead_min,
                              min_prob=cfg.min_prob, min_intensity=cfg.min_intensity,

@@ -147,6 +147,45 @@ def test_message_pluralises_cells(tmp_path):
     assert "reflectivity 31 dBZ, 2 cells, below threshold" in app.notifier.sent[0][1]
 
 
+def test_alert_starts_a_recording_under_the_state_dir(tmp_path):
+    """#57: the frames behind an alert are saved for replay, from the cached history on."""
+    from astrorainprotect.recorder import Recorder
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    app.recorder = Recorder(tmp_path / "state" / "recordings")
+    run_cycle(app)
+    folders = list((tmp_path / "state" / "recordings").iterdir())
+    assert len(folders) == 1 and len(list(folders[0].glob("*.npz"))) == 2
+
+
+def test_quiet_cycle_records_nothing(tmp_path):
+    from astrorainprotect.recorder import Recorder
+    app = build(tmp_path)
+    app.recorder = Recorder(tmp_path / "state" / "recordings")
+    run_cycle(app)
+    assert not (tmp_path / "state" / "recordings").exists()
+
+
+def test_scope_offline_closes_the_recording(tmp_path):
+    from astrorainprotect.recorder import Recorder
+    gate = {"online": ["10.0.0.5"]}
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: gate["online"],
+                radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    app.recorder = Recorder(tmp_path / "state" / "recordings")
+    run_cycle(app)
+    assert app.recorder.active
+    gate["online"] = []
+    run_cycle(app)
+    run_cycle(app)                                     # offline after two missed polls
+    assert not app.recorder.active
+
+
+def test_build_app_records_only_when_enabled(tmp_path):
+    from astrorainprotect.app import build_app
+    env = {**BASE, "STATE_DIR": str(tmp_path)}
+    assert build_app(load_config(env)).recorder is not None
+    assert build_app(load_config({**env, "AUTO_RECORD": "0"})).recorder is None
+
+
 def test_second_cycle_skips(tmp_path):
     app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
     run_cycle(app)

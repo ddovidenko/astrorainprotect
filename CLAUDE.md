@@ -151,6 +151,12 @@ tested:
   PUT with the text in headers; any failure falls back to the plain text POST,
   so an image problem never costs an alert. Stale frames are never attached.
   `SNAPSHOT=0` disables.
+- Auto-recording (#57): a new alert starts a recording under
+  `STATE_DIR/recordings/<UTC YYYYMMDD-HHMM>/`, beginning with the cached frames,
+  continuing while latched and for 30 minutes after re-arm (closed at once when
+  the scope gate clears the latch). Newest 10 kept. Same `.npz` names as
+  `scripts/record_frames.py`, so a folder replays as it is. File errors are
+  logged and never affect an alert. `AUTO_RECORD=0` disables.
 - Fatal startup errors (bad config, unwritable state dir) send one
   high-priority "failed to start" notification per container lifetime (#26).
 - ntfy: POST plain text to `NTFY_URL` (server + topic), headers `Title`,
@@ -187,6 +193,7 @@ variables carry over.
 | `REPEAT_MIN` | 0 | repeat interval while active |
 | `SCOPE_HOSTS` | empty | scope-online gate |
 | `SNAPSHOT` | 1 | attach a radar snapshot PNG to alerts |
+| `AUTO_RECORD` | 1 | save the frames behind every alert under `STATE_DIR/recordings/` |
 | `PW_KEY` | empty | enables Pirate Weather secondary trigger |
 | `MIN_PROB` | 0.3 | Pirate Weather probability threshold |
 | `REPLAY_DIR` | empty | run the detector over saved frames and exit (local tuning only) |
@@ -217,6 +224,7 @@ variables carry over.
 │   ├── notify.py             ntfy client, attachment PUT with text fallback
 │   ├── state.py              latch/repeat/test-marker/scope-set/heartbeat files
 │   ├── replay.py             REPLAY_DIR mode, dry-run notifier
+│   ├── recorder.py           saves the frames behind an alert to STATE_DIR/recordings
 │   └── healthcheck.py        Docker HEALTHCHECK: heartbeat staleness
 ├── tests/                    one test_<module>.py per module, plus test_smoke.py
 │   └── fixtures/             S3 listing and Pirate Weather samples

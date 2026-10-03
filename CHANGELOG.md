@@ -56,6 +56,9 @@ Keep a Changelog; versions follow SemVer.
   Portainer variable to the new name, so existing stack variables carry over unchanged (#25).
 
 ### Added
+- Every new alert starts a recording of the frames behind it under `STATE_DIR/recordings/`:
+  the cached history first, then every frame while latched and for 30 minutes after re-arm.
+  Newest 10 kept; a folder replays as it is with `REPLAY_DIR`. `AUTO_RECORD=0` disables (#57).
 - Pirate Weather outages are visible: the summary line carries `pirate=ok|down:N|off|skipped`,
   and after three consecutive failed polls one default-priority "Pirate Weather unavailable"
   notification goes out, with "Pirate Weather back" on recovery. The fetch timeout drops from

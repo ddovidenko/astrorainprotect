@@ -7,9 +7,19 @@ event; the commands below already work.
 
 ## Record
 
-Run this on any machine with the project installed (see CONTRIBUTING.md), when
-rain is expected in the next hour or two. Starting early matters: the motion
-estimate needs at least 8 minutes of history, ideally 20, before a cell arrives.
+The running alarm records every event by itself (`AUTO_RECORD=1`, the default):
+from the first alert, starting with the cached 30 minutes of history, until 30
+minutes after re-arm, into `STATE_DIR/recordings/<UTC date-time>/`. The newest
+10 recordings are kept. Copy one off the Docker host for replay, for example:
+
+```bash
+scp -r host:/opt/astrorainprotect/state/recordings/20261002-0310 frames-2026-10-02/
+```
+
+To record by hand (a quiet night, or a machine without the alarm), run this on
+any machine with the project installed (see CONTRIBUTING.md), when rain is
+expected in the next hour or two. Starting early matters: the motion estimate
+needs at least 8 minutes of history, ideally 20, before a cell arrives.
 
 ```bash
 LAT=<lat> LON=<lon> .venv/bin/python scripts/record_frames.py frames/ --minutes 180 --interval 120

@@ -27,6 +27,7 @@ services:
       - REPEAT_MIN=${REPEAT_MIN:-0}
       - SCOPE_HOSTS=${SCOPE_HOSTS:-}
       - SNAPSHOT=${SNAPSHOT:-1}
+      - AUTO_RECORD=${AUTO_RECORD:-1}
       - PW_KEY=${PW_KEY:-}
       - MIN_PROB=${MIN_PROB:-0.3}
     volumes:

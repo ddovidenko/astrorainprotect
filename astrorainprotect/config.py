@@ -40,6 +40,7 @@ class Config:
     min_prob: float = 0.3
     replay_dir: str = ""
     snapshot: bool = True
+    auto_record: bool = True
     state_dir: str = "/state"
 
 
@@ -114,6 +115,7 @@ def load_config(env: Mapping[str, str]) -> Config:
         min_prob=_float(env, "MIN_PROB", 0.3, 0.0, 1.0),
         replay_dir=_str(env, "REPLAY_DIR"),
         snapshot=_int(env, "SNAPSHOT", 1, 0, 1) == 1,
+        auto_record=_int(env, "AUTO_RECORD", 1, 0, 1) == 1,
         state_dir=_str(env, "STATE_DIR", "/state"),
     )
 

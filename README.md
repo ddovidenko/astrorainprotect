@@ -71,6 +71,7 @@ Legacy names preserved; new vars marked.
 | `REPEAT_MIN` | 0 | repeat interval while active |
 | `SCOPE_HOSTS` | empty | scope-online gate; 5 s connect timeout, one retry, offline only after two missed polls |
 | `SNAPSHOT` (new) | 1 | attach a radar snapshot PNG to alerts and the test notification; 0 disables |
+| `AUTO_RECORD` (new) | 1 | save the frames behind every alert under `STATE_DIR/recordings/` for replay; 0 disables |
 | `PW_KEY` | empty | enables Pirate Weather trigger |
 | `MIN_PROB` | 0.3 | Pirate Weather probability threshold |
 | `REPLAY_DIR` (new) | empty | run detector over saved frames and exit |
@@ -109,6 +110,12 @@ script):
   overhead — in-place convection, the case this project exists for — would
   never have produced an alert. Pirate Weather's own "raining now" never
   silences a radar trigger.
+- **Recording**: every new alert starts a recording under
+  `STATE_DIR/recordings/<UTC date-time>/`: the cached frames (up to 30 minutes
+  before the alert), then every frame while the alarm is latched and for 30
+  minutes after it re-arms. The newest 10 recordings are kept, about 2 MB per
+  6 hours each. A folder replays as it is with `REPLAY_DIR`; see
+  `docs/tuning.md`. `AUTO_RECORD=0` disables.
 - **Pirate Weather outage**: with `PW_KEY` set, three consecutive failed polls
   (15 minutes at `POLL_SEC=300`) send one `default`-priority "Pirate Weather
   unavailable" notification, and the first successful poll after it sends

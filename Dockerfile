@@ -5,6 +5,10 @@ COPY astrorainprotect ./astrorainprotect
 RUN pip install --no-cache-dir --prefix=/install .
 
 FROM python:3.12-slim
+# The source label ties the GHCR package to this repo, so the package page shows the README.
+LABEL org.opencontainers.image.source="https://github.com/ddovidenko/astrorainprotect" \
+      org.opencontainers.image.description="Radar-based rain alarm: pushes an ntfy notification when rain approaches your coordinates" \
+      org.opencontainers.image.licenses="MIT"
 ENV PYTHONUNBUFFERED=1 TZ=America/Chicago STATE_DIR=/state
 RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
     && rm -rf /var/lib/apt/lists/* \

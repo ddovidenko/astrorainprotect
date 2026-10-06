@@ -41,5 +41,8 @@ jobs:
           tags: |
             ghcr.io/ddovidenko/astrorainprotect:latest
             ghcr.io/ddovidenko/astrorainprotect:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

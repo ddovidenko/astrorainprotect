@@ -45,8 +45,26 @@ mkdir state               # the container runs as uid 1000; chown 1000:1000 if y
 docker compose up -d      # builds the image locally; docker compose logs -f to watch
 ```
 
-The published image is `ghcr.io/ddovidenko/astrorainprotect:latest`; use it in
-place of `build: .` if you prefer not to build.
+**Prebuilt image**
+
+Every push to `main` publishes `ghcr.io/ddovidenko/astrorainprotect:latest`
+(and the same image under its commit SHA, which is the tag the GHCR package page
+happens to show). Use `latest` unless you want to pin:
+
+```bash
+docker pull ghcr.io/ddovidenko/astrorainprotect:latest
+mkdir -p /opt/astrorainprotect/state && chown 1000:1000 /opt/astrorainprotect/state
+docker run -d --name astrorainprotect --restart unless-stopped \
+  -e LAT=<lat> -e LON=<lon> -e NTFY_URL=https://ntfy.sh/<topic> \
+  -e ASTRORAINPROTECT_DEBUG=2 \
+  -v /opt/astrorainprotect/state:/state \
+  ghcr.io/ddovidenko/astrorainprotect:latest
+```
+
+Or point `docker compose` at `portainer-stack.yml`, which uses the published
+image and the same variables. With a plain `docker run` the debug level must be
+named `ASTRORAINPROTECT_DEBUG`; a bare `DEBUG` is ignored (see Configuration).
+The stack file maps Portainer's `DEBUG` variable for you.
 
 ## Configuration
 

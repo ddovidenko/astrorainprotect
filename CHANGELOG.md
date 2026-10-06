@@ -23,6 +23,8 @@ Keep a Changelog; versions follow SemVer.
   on 44 polls, 37 of them a decaying echo with no clear shift (#47).
 
 ### Changed
+- The image carries OCI source/description/licence labels, so the GHCR package page links to
+  this repo and shows the README; the README gains a prebuilt-image quick start.
 - `DIRECTION_FILTER=1` no longer drops the radar trigger for echoes moving away: the first
   alert always goes out, headed "Rain nearby (moving away)" with the closest approach in the
   detail, and only repeats are held while every active trigger recedes. The latch stays set, so

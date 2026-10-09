@@ -6,6 +6,10 @@ Keep a Changelog; versions follow SemVer.
 ## [Unreleased]
 
 ### Fixed
+- The healthcheck goes unhealthy when nothing external has answered for six polls (radar
+  listing, accepted ntfy send, Pirate Weather fetch, or a `HEAD` on the MRMS bucket on
+  gate-closed cycles; scopes on the LAN do not count). A
+  container that had lost its network ran 13 hours showing healthy (#62).
 - A repeat fires on the poll nearest to `REPEAT_MIN`, counting up to half a poll early as due.
   With `REPEAT_MIN=10` and `POLL_SEC=300` the live container repeated every third poll (about
   14.5 minutes) because its polls landed a few seconds short of 300 s (#53).

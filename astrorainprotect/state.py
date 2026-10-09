@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
+
+log = logging.getLogger("astrorainprotect")
 
 
 class State:
@@ -11,6 +14,7 @@ class State:
         self._dir = Path(state_dir)
         self._latch = self._dir / "alerted"
         self._heartbeat = self._dir / "heartbeat"
+        self._contact = self._dir / "contact"     # last time anything external answered (#62)
         self._test_marker = Path(tmp_dir) / "astrorainprotect_test_sent"
         self._scopes = self._dir / "scopes_online"
 
@@ -53,6 +57,17 @@ class State:
 
     def heartbeat_age_sec(self, now: float) -> float | None:
         return self._age(self._heartbeat, now)
+
+    def contact(self, now: float) -> None:
+        """Record that something external answered. Bookkeeping for the healthcheck only, so a
+        write failure is logged and swallowed: it must never cost the cycle that noticed it."""
+        try:
+            self._touch(self._contact, now)
+        except OSError as exc:
+            log.error("state: could not touch contact file: %s", exc)
+
+    def contact_age_sec(self, now: float) -> float | None:
+        return self._age(self._contact, now)
 
     def last_scopes(self) -> set[str] | None:
         """Hosts that were online at the last poll, or None if never recorded."""

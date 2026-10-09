@@ -66,11 +66,12 @@ def raining(product, value):
     return make_frame(g, product=product, valid_time=NOW - timedelta(minutes=2))
 
 
-def build(tmp_path, env=None, radar=None, notifier=None, scope=None, now=NOW):
+def build(tmp_path, env=None, radar=None, notifier=None, scope=None, now=NOW, probe=None):
     cfg = load_config({**BASE, "STATE_DIR": str(tmp_path / "state"), **(env or {})})
     return App(cfg=cfg, radar=radar or FakeRadar(empty("preciprate"), empty("reflectivity")),
                notifier=notifier or FakeNotifier(), state=State(cfg.state_dir, tmp_path / "tmp"),
-               scope_check=scope or (lambda: []), pirate=None, clock=lambda: now)
+               scope_check=scope or (lambda: []), pirate=None, clock=lambda: now,
+               probe=probe or (lambda: False))
 
 
 def test_radar_status():
@@ -224,6 +225,116 @@ def test_scope_announcement_is_stamped(tmp_path):
     app.state.set_scopes(set())
     run_cycle(app)
     assert app.notifier.sent[0][0] == "Scope online" and app.notifier.stamps == ["20:00"]
+
+
+def contact_age(app):
+    return app.state.contact_age_sec(app.clock().timestamp())
+
+
+def test_radar_fetch_counts_as_contact(tmp_path):
+    """#62: anything external that answers refreshes the contact file the healthcheck reads."""
+    app = build(tmp_path)
+    run_cycle(app)
+    assert contact_age(app) == 0
+
+
+def test_blind_cycle_leaves_contact_untouched(tmp_path):
+    """Radar down, no scope answering, probe failing, ntfy failing: the 2026-10-03 outage."""
+    from astrorainprotect.mrms import MrmsError
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: [],
+                radar=FakeRadar(error=MrmsError("S3 listing failed", kind="listing")),
+                notifier=FakeNotifier(ok=False), probe=lambda: False)
+    app.state.set_scopes({"10.0.0.5"})
+    for _ in range(3):
+        run_cycle(app)
+    assert contact_age(app) is None
+
+
+def test_gate_closed_cycle_probes_the_bucket_and_counts_success(tmp_path):
+    calls = []
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: [],
+                probe=lambda: calls.append(1) or True)
+    run_cycle(app)
+    assert calls == [1] and contact_age(app) == 0
+
+
+def test_gate_open_cycle_does_not_probe(tmp_path):
+    calls = []
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: ["10.0.0.5"],
+                probe=lambda: calls.append(1) or True)
+    run_cycle(app)
+    assert calls == []
+
+
+def test_scope_answering_is_not_contact(tmp_path):
+    """LAN up, WAN down: the scope answers while radar and ntfy are dead. Still blind."""
+    from astrorainprotect.mrms import MrmsError
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: ["10.0.0.5"],
+                radar=FakeRadar(error=MrmsError("S3 listing failed", kind="listing")),
+                notifier=FakeNotifier(ok=False))
+    app.state.set_scopes({"10.0.0.5"})
+    run_cycle(app)
+    assert contact_age(app) is None
+
+
+def test_pirate_fetch_counts_as_contact_but_a_cached_answer_does_not(tmp_path):
+    """#62 review: check() serves its cache between fetches; only a real answer is contact."""
+    from astrorainprotect.mrms import MrmsError
+    radar = FakeRadar(error=MrmsError("S3 listing failed", kind="listing"))
+    app = build(tmp_path, radar=radar)
+    app.pirate = FakePirate(result=pw(None), cached=True)
+    run_cycle(app)
+    assert contact_age(app) is None
+    app.pirate = FakePirate(result=pw(None))
+    run_cycle(app)
+    assert contact_age(app) == 0
+
+
+def test_scope_announcement_counts_as_contact(tmp_path):
+    from astrorainprotect.mrms import MrmsError
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: ["10.0.0.5"],
+                radar=FakeRadar(error=MrmsError("S3 listing failed", kind="listing")))
+    app.state.set_scopes(set())
+    run_cycle(app)                                        # "came online" is accepted by ntfy
+    assert contact_age(app) == 0
+
+
+def test_accepted_alert_counts_as_contact(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    app.radar.frames = lambda product: []                 # hide the cache from the radar rule
+    run_cycle(app)
+    assert contact_age(app) == 0
+
+
+def test_successful_send_counts_as_contact(tmp_path):
+    from astrorainprotect.mrms import MrmsError
+    app = build(tmp_path, env={"ASTRORAINPROTECT_DEBUG": "2"},
+                radar=FakeRadar(error=MrmsError("S3 listing failed", kind="listing")))
+    run_cycle(app)                                        # only the test notification succeeds
+    assert contact_age(app) == 0
+
+
+def test_contact_write_failure_never_blocks_the_alert(tmp_path, caplog):
+    """The contact file is bookkeeping for the healthcheck; a full disk must not cost a cycle."""
+    caplog.set_level(logging.ERROR)
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    real_touch = app.state._touch
+
+    def touch(path, now):
+        if path.name == "contact":
+            raise OSError(28, "No space left on device")
+        real_touch(path, now)
+
+    app.state._touch = touch
+    line = run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"] and "outcome=send" in line
+    assert any("contact" in r.getMessage() for r in caplog.records)
+
+
+def test_build_app_has_a_bucket_probe(tmp_path):
+    from astrorainprotect.app import build_app
+    app = build_app(load_config({**BASE, "STATE_DIR": str(tmp_path)}))
+    assert callable(app.probe)
 
 
 def test_second_cycle_skips(tmp_path):
@@ -404,13 +515,17 @@ def test_main_missing_env_exits_nonzero(monkeypatch, capsys):
 
 
 class FakePirate:
-    def __init__(self, result=None, error=None):
+    def __init__(self, result=None, error=None, cached=False):
         self.result, self.error, self.calls = result, error, 0
+        self.cached = cached                  # True: answer from cache, no network call
+        self.last_answer = None
 
     def check(self, now):
         self.calls += 1
         if self.error:
             raise self.error
+        if not self.cached:
+            self.last_answer = now
         return self.result
 
 

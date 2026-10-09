@@ -161,6 +161,12 @@ tested:
   high-priority "failed to start" notification per container lifetime (#26).
 - Every message body starts with `[HH:MM]` in `TZ` (#64): the radar frame's
   valid time for alerts and repeats, the send time for announcements.
+- Healthcheck (#62): unhealthy when the heartbeat is older than 3 polls or
+  when nothing external has answered for 6 polls. `STATE_DIR/contact` is
+  touched by every answered radar listing, accepted ntfy send and successful
+  Pirate Weather fetch (not its cache); gate-closed cycles do one `HEAD` on the
+  MRMS bucket instead, so a quiet night with the scopes off stays healthy and a
+  container with no network does not. Scopes answering on the LAN do not count.
 - ntfy: POST plain text to `NTFY_URL` (server + topic), headers `Title`,
   `Priority: high`, `Tags: loud_sound,bell`, and `Authorization: Bearer
   $NTFY_TOKEN` only when the token is non-empty. Log ntfy's HTTP status and
@@ -227,7 +233,7 @@ variables carry over.
 │   ├── state.py              latch/repeat/test-marker/scope-set/heartbeat files
 │   ├── replay.py             REPLAY_DIR mode, dry-run notifier
 │   ├── recorder.py           saves the frames behind an alert to STATE_DIR/recordings
-│   └── healthcheck.py        Docker HEALTHCHECK: heartbeat staleness
+│   └── healthcheck.py        Docker HEALTHCHECK: heartbeat staleness, no external contact (#62)
 ├── tests/                    one test_<module>.py per module, plus test_smoke.py
 │   └── fixtures/             S3 listing and Pirate Weather samples
 ├── docs/tuning.md            record -> replay -> compare workflow

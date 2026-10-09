@@ -191,6 +191,19 @@ script):
   cells) or `(no clear shift)` (the frames match about as well without
   moving, as a decaying echo does). Rain at the site always alerts.
 
+## Health
+
+The container's `HEALTHCHECK` reports unhealthy when the poll loop has stopped
+(no heartbeat for three polls) **or** when nothing external has answered for
+six polls (18 minutes at `POLL_SEC=180`): no radar listing answered, no ntfy
+send accepted, no Pirate Weather fetch succeeded, and on nights when the scope
+gate is closed a cheap `HEAD` on the MRMS bucket failing too. Scopes answering
+on the LAN do not count; the outage this guards against is the WAN. That is the
+signature of a container that has lost its network, which once ran 13 hours
+with `docker ps` showing healthy. Docker does not restart a container on a
+failing healthcheck by itself; Portainer shows the state, and Watchtower or an
+autoheal container can act on it.
+
 ## Reading the logs
 
 Each poll cycle ends with one summary line, for example:

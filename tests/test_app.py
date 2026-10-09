@@ -34,11 +34,17 @@ class FakeRadar:
 
 
 class FakeNotifier:
+    """Records sends. The leading "[HH:MM]" stamp (#64) is split off into `stamps` so the
+    message assertions read the text alone."""
+
     def __init__(self, ok=True):
         self.ok, self.sent, self.priorities, self.attachments = ok, [], [], []
+        self.stamps = []
 
     def send(self, title, message, priority=None, attachment=None):
-        self.sent.append((title, message))
+        m = re.match(r"\[(\d\d:\d\d)\] (.*)", message, re.S)
+        self.stamps.append(m.group(1) if m else None)
+        self.sent.append((title, m.group(2) if m else message))
         self.priorities.append(priority)
         self.attachments.append(attachment)
         return self.ok
@@ -184,6 +190,40 @@ def test_build_app_records_only_when_enabled(tmp_path):
     env = {**BASE, "STATE_DIR": str(tmp_path)}
     assert build_app(load_config(env)).recorder is not None
     assert build_app(load_config({**env, "AUTO_RECORD": "0"})).recorder is None
+
+
+def test_alert_is_stamped_with_the_frame_time_in_local_tz(tmp_path):
+    """#64: ntfy shows only the date after a few hours; the body carries HH:MM of the frame."""
+    frame = storm("reflectivity", 40.0)                   # valid 19:58Z
+    app = build(tmp_path, env={"TZ": "America/Chicago"},
+                radar=FakeRadar(empty("preciprate"), frame))
+    run_cycle(app)
+    assert app.notifier.stamps == ["14:58"]              # frame time, not the 15:00 clock
+
+
+def test_stamp_follows_tz(tmp_path):
+    app = build(tmp_path, env={"TZ": "UTC"},
+                radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    run_cycle(app)
+    assert app.notifier.stamps == ["19:58"]
+
+
+def test_announcements_are_stamped_with_the_send_time(tmp_path):
+    app = build(tmp_path, env={"TZ": "UTC", "ASTRORAINPROTECT_DEBUG": "2"})
+    run_cycle(app)                                        # test notification
+    app.pirate = FakePirate(error=PirateError("timed out"))
+    app.failures["pirate"] = 2
+    run_cycle(app)                                        # Pirate Weather unavailable
+    assert [t for t, _ in app.notifier.sent] == ["Rain alert test", "Pirate Weather unavailable"]
+    assert app.notifier.stamps == ["20:00", "20:00"]
+
+
+def test_scope_announcement_is_stamped(tmp_path):
+    app = build(tmp_path, env={"TZ": "UTC", "SCOPE_HOSTS": "10.0.0.5"},
+                scope=lambda: ["10.0.0.5"])
+    app.state.set_scopes(set())
+    run_cycle(app)
+    assert app.notifier.sent[0][0] == "Scope online" and app.notifier.stamps == ["20:00"]
 
 
 def test_second_cycle_skips(tmp_path):

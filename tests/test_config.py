@@ -15,6 +15,7 @@ def test_defaults():
     assert cfg.debug == 0
     assert cfg.snapshot is True
     assert cfg.auto_record is True
+    assert cfg.tz == "America/Chicago"
     assert cfg.poll_sec == 180
     assert cfg.alert_radius_km == 20.0
     assert cfg.now_radius_km == 1.0

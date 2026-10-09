@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -97,6 +98,17 @@ def _detect_product(
 
 
 UNITS = {"reflectivity": "dBZ", "preciprate": "mm/h"}
+
+
+def stamp(dt: datetime, tz: str) -> str:
+    """"[HH:MM]" in the configured zone, for the start of every message (#64): the ntfy app
+    shows only the date after a few hours. Falls back to the container's local time if the
+    zone name is unknown."""
+    try:
+        local = dt.astimezone(ZoneInfo(tz))
+    except (ZoneInfoNotFoundError, ValueError):
+        local = dt.astimezone()
+    return f"[{local:%H:%M}]"
 
 
 def _product_state(product: str, d: Detection | None) -> str:
@@ -261,7 +273,8 @@ def _announce_scope_changes(app: App, online: list[str]) -> None:
     else:
         tail = "No scope online; radar checks paused until one returns."
     title = "Scopes changed" if came and went else ("Scope online" if came else "Scope offline")
-    if app.notifier.send(title, f"{'; '.join(parts)}. {tail}", priority="default"):
+    body = f"{stamp(app.clock(), app.cfg.tz)} {'; '.join(parts)}. {tail}"
+    if app.notifier.send(title, body, priority="default"):
         log.info("scope change announced: %s", "; ".join(parts))
         app.state.set_scopes(now_online)
     else:
@@ -287,7 +300,8 @@ def _announce_pirate_down(app: App, reason: str) -> None:
     n = app.failures["pirate"]
     if n < PIRATE_DOWN_POLLS or app.pirate_down_announced:
         return
-    msg = f"No answer from Pirate Weather for {n} polls ({reason}). Radar alerts continue."
+    msg = (f"{stamp(app.clock(), app.cfg.tz)} No answer from Pirate Weather for {n} polls "
+           f"({reason}). Radar alerts continue.")
     if app.notifier.send("Pirate Weather unavailable", msg, priority="default"):
         app.pirate_down_announced = True
     else:
@@ -299,7 +313,7 @@ def _pirate_recovered(app: App) -> None:
     app.failures["pirate"] = 0
     if not app.pirate_down_announced:
         return
-    msg = f"Pirate Weather answered again after {n} failed polls."
+    msg = f"{stamp(app.clock(), app.cfg.tz)} Pirate Weather answered again after {n} failed polls."
     if app.notifier.send("Pirate Weather back", msg, priority="default"):
         app.pirate_down_announced = False
     else:
@@ -360,7 +374,9 @@ def _snapshot(app: App, *, fetch: bool = False) -> tuple[bytes, str] | None:
 def _maybe_send_test(app: App, scope_status: str) -> None:
     if app.cfg.debug >= 2 and not app.state.test_sent():
         # First cycle has nothing cached yet; fetch once so the test proves the image path too.
-        if app.notifier.send(TITLE_TEST, f"Test from astrorainprotect. {scope_status}",
+        if app.notifier.send(TITLE_TEST,
+                             f"{stamp(app.clock(), app.cfg.tz)} Test from astrorainprotect. "
+                             f"{scope_status}",
                              attachment=_snapshot(app, fetch=True)):
             app.state.mark_test_sent()
             log.info("TEST notification sent")
@@ -478,7 +494,10 @@ def run_cycle(app: App) -> str:
 
     outcome = decision.action.name.lower()
     if decision.action in (Action.SEND, Action.REPEAT):
-        if app.notifier.send(decision.title, decision.message, attachment=_snapshot(app)):
+        # Stamp with the frame the message describes, not the send time (#64).
+        body = f"{stamp(newest.valid_time if newest is not None else now, cfg.tz)} " \
+               f"{decision.message}"
+        if app.notifier.send(decision.title, body, attachment=_snapshot(app)):
             app.state.set_latch(ts)
             app.failures["ntfy"] = 0
             log.info(

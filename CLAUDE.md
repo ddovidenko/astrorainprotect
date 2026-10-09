@@ -159,6 +159,8 @@ tested:
   logged and never affect an alert. `AUTO_RECORD=0` disables.
 - Fatal startup errors (bad config, unwritable state dir) send one
   high-priority "failed to start" notification per container lifetime (#26).
+- Every message body starts with `[HH:MM]` in `TZ` (#64): the radar frame's
+  valid time for alerts and repeats, the send time for announcements.
 - ntfy: POST plain text to `NTFY_URL` (server + topic), headers `Title`,
   `Priority: high`, `Tags: loud_sound,bell`, and `Authorization: Bearer
   $NTFY_TOKEN` only when the token is non-empty. Log ntfy's HTTP status and
@@ -198,7 +200,7 @@ variables carry over.
 | `MIN_PROB` | 0.3 | Pirate Weather probability threshold |
 | `REPLAY_DIR` | empty | run the detector over saved frames and exit (local tuning only) |
 | `STATE_DIR` | /state | latch/heartbeat directory; fixed by the image in production |
-| `TZ` | America/Chicago | for log timestamps |
+| `TZ` | America/Chicago | for log timestamps and the `[HH:MM]` message stamp |
 
 ## Repository layout
 

@@ -106,7 +106,10 @@ result into a small latch-based state machine (ported from the legacy shell
 script):
 
 - **First trigger**: if rain qualifies nearby and the alarm isn't already
-  latched, it sends an alert and latches. The radar detail names both products
+  latched, it sends an alert and latches. Every message starts with `[HH:MM]`
+  in `TZ`: for alerts and repeats the time of the radar frame described, for
+  the test notification and the scope and Pirate Weather announcements the
+  send time. The ntfy app shows only the date after a few hours. The radar detail names both products
   every time, the qualifying one first and the other with its state, for
   example `radar: preciprate 6 mm/h 19.9 km to the S; reflectivity 28 dBZ,
   1 cell, below threshold` (or `under threshold`, `none in range`, `no data`).

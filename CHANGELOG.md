@@ -58,6 +58,9 @@ Keep a Changelog; versions follow SemVer.
   Portainer variable to the new name, so existing stack variables carry over unchanged (#25).
 
 ### Added
+- Every notification body starts with `[HH:MM]` in `TZ`: the radar frame's time for alerts
+  and repeats, the send time for the test notification and announcements. The ntfy app shows
+  only the date after a few hours (#64).
 - Every new alert starts a recording of the frames behind it under `STATE_DIR/recordings/`:
   the cached history first, then every frame while latched and for 30 minutes after re-arm.
   Newest 10 kept; a folder replays as it is with `REPLAY_DIR`. `AUTO_RECORD=0` disables (#57).

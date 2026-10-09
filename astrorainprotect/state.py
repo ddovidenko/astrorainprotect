@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
+
+log = logging.getLogger("astrorainprotect")
 
 
 class State:
@@ -56,7 +59,12 @@ class State:
         return self._age(self._heartbeat, now)
 
     def contact(self, now: float) -> None:
-        self._touch(self._contact, now)
+        """Record that something external answered. Bookkeeping for the healthcheck only, so a
+        write failure is logged and swallowed: it must never cost the cycle that noticed it."""
+        try:
+            self._touch(self._contact, now)
+        except OSError as exc:
+            log.error("state: could not touch contact file: %s", exc)
 
     def contact_age_sec(self, now: float) -> float | None:
         return self._age(self._contact, now)

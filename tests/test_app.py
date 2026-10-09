@@ -284,6 +284,23 @@ def test_successful_send_counts_as_contact(tmp_path):
     assert contact_age(app) == 0
 
 
+def test_contact_write_failure_never_blocks_the_alert(tmp_path, caplog):
+    """The contact file is bookkeeping for the healthcheck; a full disk must not cost a cycle."""
+    caplog.set_level(logging.ERROR)
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    real_touch = app.state._touch
+
+    def touch(path, now):
+        if path.name == "contact":
+            raise OSError(28, "No space left on device")
+        real_touch(path, now)
+
+    app.state._touch = touch
+    line = run_cycle(app)
+    assert [t for t, _ in app.notifier.sent] == ["Rain incoming"] and "outcome=send" in line
+    assert any("contact" in r.getMessage() for r in caplog.records)
+
+
 def test_build_app_has_a_bucket_probe(tmp_path):
     from astrorainprotect.app import build_app
     app = build_app(load_config({**BASE, "STATE_DIR": str(tmp_path)}))

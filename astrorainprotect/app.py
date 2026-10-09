@@ -398,12 +398,9 @@ def run_cycle(app: App) -> str:
 
     # The DEBUG=2 test send runs before the scope gate so a restart always announces itself,
     # and says whether it is checking radar or waiting for a scope.
-    online = None
-    if cfg.scope_hosts:
-        answered = app.scope_check()
-        if answered:
-            app.state.contact(ts)
-        online = _debounce_scopes(app, answered)
+    # A scope answering is not contact: it is on the LAN, and the outage this guards against
+    # is the WAN (#62 review).
+    online = _debounce_scopes(app, app.scope_check()) if cfg.scope_hosts else None
     _maybe_send_test(app, _scope_status(cfg, online))
     if online is not None:
         try:
@@ -485,7 +482,8 @@ def run_cycle(app: App) -> str:
     if app.pirate is not None:
         try:
             pr = app.pirate.check(now)
-            app.state.contact(ts)
+            if getattr(app.pirate, "last_answer", None) == now:   # a fetch, not the cache
+                app.state.contact(ts)
             _pirate_announce(app, _pirate_recovered)
             pirate_txt = "ok"
         except PirateError as exc:

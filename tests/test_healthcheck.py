@@ -34,6 +34,13 @@ def test_unhealthy_when_nothing_external_answered_for_six_polls(tmp_path):
     assert main(env, now=1000.0 + 6 * 180 + 1) == 1
 
 
+def test_unhealthy_at_exactly_six_polls(tmp_path):
+    st = State(tmp_path)
+    st.contact(1000.0)
+    st.heartbeat(1000.0 + 6 * 180)
+    assert main({**ENV, "STATE_DIR": str(tmp_path)}, now=1000.0 + 6 * 180) == 1
+
+
 def test_healthy_within_six_polls_of_last_contact(tmp_path):
     st = State(tmp_path)
     st.contact(1000.0)

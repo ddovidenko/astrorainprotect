@@ -266,12 +266,42 @@ def test_gate_open_cycle_does_not_probe(tmp_path):
     assert calls == []
 
 
-def test_scope_answering_counts_as_contact(tmp_path):
+def test_scope_answering_is_not_contact(tmp_path):
+    """LAN up, WAN down: the scope answers while radar and ntfy are dead. Still blind."""
     from astrorainprotect.mrms import MrmsError
     app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: ["10.0.0.5"],
                 radar=FakeRadar(error=MrmsError("S3 listing failed", kind="listing")),
                 notifier=FakeNotifier(ok=False))
     app.state.set_scopes({"10.0.0.5"})
+    run_cycle(app)
+    assert contact_age(app) is None
+
+
+def test_pirate_fetch_counts_as_contact_but_a_cached_answer_does_not(tmp_path):
+    """#62 review: check() serves its cache between fetches; only a real answer is contact."""
+    from astrorainprotect.mrms import MrmsError
+    radar = FakeRadar(error=MrmsError("S3 listing failed", kind="listing"))
+    app = build(tmp_path, radar=radar)
+    app.pirate = FakePirate(result=pw(None), cached=True)
+    run_cycle(app)
+    assert contact_age(app) is None
+    app.pirate = FakePirate(result=pw(None))
+    run_cycle(app)
+    assert contact_age(app) == 0
+
+
+def test_scope_announcement_counts_as_contact(tmp_path):
+    from astrorainprotect.mrms import MrmsError
+    app = build(tmp_path, env={"SCOPE_HOSTS": "10.0.0.5"}, scope=lambda: ["10.0.0.5"],
+                radar=FakeRadar(error=MrmsError("S3 listing failed", kind="listing")))
+    app.state.set_scopes(set())
+    run_cycle(app)                                        # "came online" is accepted by ntfy
+    assert contact_age(app) == 0
+
+
+def test_accepted_alert_counts_as_contact(tmp_path):
+    app = build(tmp_path, radar=FakeRadar(empty("preciprate"), storm("reflectivity", 40.0)))
+    app.radar.frames = lambda product: []                 # hide the cache from the radar rule
     run_cycle(app)
     assert contact_age(app) == 0
 
@@ -485,13 +515,17 @@ def test_main_missing_env_exits_nonzero(monkeypatch, capsys):
 
 
 class FakePirate:
-    def __init__(self, result=None, error=None):
+    def __init__(self, result=None, error=None, cached=False):
         self.result, self.error, self.calls = result, error, 0
+        self.cached = cached                  # True: answer from cache, no network call
+        self.last_answer = None
 
     def check(self, now):
         self.calls += 1
         if self.error:
             raise self.error
+        if not self.cached:
+            self.last_answer = now
         return self.result
 
 

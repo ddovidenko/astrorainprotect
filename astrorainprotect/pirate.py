@@ -82,6 +82,7 @@ class PirateSource:
         self._interval = min_interval_sec
         self._last_call: datetime | None = None
         self._last: PirateResult | None = None
+        self.last_answer: datetime | None = None   # time of the last fetch that succeeded (#62)
 
     def check(self, now: datetime) -> PirateResult | None:
         if self._last_call is not None and (now - self._last_call).total_seconds() < self._interval:
@@ -89,5 +90,6 @@ class PirateSource:
         self._last_call = now
         self._last = None
         data = fetch_forecast(self._client, self._key, self._lat, self._lon)
+        self.last_answer = now
         self._last = evaluate(data, **self._kw)
         return self._last

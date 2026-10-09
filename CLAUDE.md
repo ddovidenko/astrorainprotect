@@ -163,10 +163,10 @@ tested:
   valid time for alerts and repeats, the send time for announcements.
 - Healthcheck (#62): unhealthy when the heartbeat is older than 3 polls or
   when nothing external has answered for 6 polls. `STATE_DIR/contact` is
-  touched by every radar fetch, accepted ntfy send, Pirate Weather answer and
-  scope that answers; gate-closed cycles do one `HEAD` on the MRMS bucket
-  instead, so a quiet night with the scopes off stays healthy and a container
-  with no network does not.
+  touched by every answered radar listing, accepted ntfy send and successful
+  Pirate Weather fetch (not its cache); gate-closed cycles do one `HEAD` on the
+  MRMS bucket instead, so a quiet night with the scopes off stays healthy and a
+  container with no network does not. Scopes answering on the LAN do not count.
 - ntfy: POST plain text to `NTFY_URL` (server + topic), headers `Title`,
   `Priority: high`, `Tags: loud_sound,bell`, and `Authorization: Bearer
   $NTFY_TOKEN` only when the token is non-empty. Log ntfy's HTTP status and

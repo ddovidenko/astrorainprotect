@@ -380,3 +380,24 @@ def test_mrms_error_carries_failure_class(call, kind):
     with pytest.raises(MrmsError) as info:
         call()
     assert info.value.kind == kind
+
+
+def test_bucket_reachable_head_only():
+    from astrorainprotect.mrms import bucket_reachable
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, str(request.url)))
+        return httpx.Response(200)
+
+    assert bucket_reachable(httpx.Client(transport=httpx.MockTransport(handler))) is True
+    assert seen == [("HEAD", "https://noaa-mrms-pds.s3.amazonaws.com/")]
+
+
+def test_bucket_unreachable_on_network_error():
+    from astrorainprotect.mrms import bucket_reachable
+
+    def handler(request):
+        raise httpx.ConnectError("Network is unreachable")
+
+    assert bucket_reachable(httpx.Client(transport=httpx.MockTransport(handler))) is False

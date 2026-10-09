@@ -117,6 +117,14 @@ class GridMeta:
     nj: int       # rows
 
 
+def bucket_reachable(client: httpx.Client) -> bool:
+    """Cheap reachability check for cycles that fetch nothing (#62): a HEAD on the bucket."""
+    try:
+        return client.head(f"{BUCKET_URL}/", timeout=10.0).status_code < 500
+    except httpx.HTTPError:
+        return False
+
+
 def fetch_grib(client: httpx.Client, key: str) -> bytes:
     try:
         r = client.get(f"{BUCKET_URL}/{key}", timeout=60.0)

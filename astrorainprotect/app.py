@@ -21,7 +21,7 @@ from astrorainprotect.config import Config, ConfigError, describe, ignored_legac
 from astrorainprotect.detect import Detection, detect
 from astrorainprotect.frame import Frame
 from astrorainprotect.motion import Motion, estimate, project
-from astrorainprotect.mrms import PRODUCTS, MrmsError, RadarSource
+from astrorainprotect.mrms import PRODUCTS, MrmsError, RadarSource, bucket_reachable
 from astrorainprotect.notify import Notifier
 from astrorainprotect.pirate import PirateError, PirateSource
 from astrorainprotect.recorder import Recorder
@@ -71,6 +71,7 @@ class App:
     scope_seen: set[str] | None = None           # hosts counted online after the last poll
     pirate_down_announced: bool = False          # one "unavailable" per outage (#51)
     recorder: Recorder | None = None             # saves the frames behind an alert (#57)
+    probe: Callable[[], bool] = lambda: False    # reachability check for gate-closed cycles (#62)
 
     def __post_init__(self) -> None:
         if self.failures is None:
@@ -276,6 +277,7 @@ def _announce_scope_changes(app: App, online: list[str]) -> None:
     body = f"{stamp(app.clock(), app.cfg.tz)} {'; '.join(parts)}. {tail}"
     if app.notifier.send(title, body, priority="default"):
         log.info("scope change announced: %s", "; ".join(parts))
+        app.state.contact(app.clock().timestamp())
         app.state.set_scopes(now_online)
     else:
         app.failures["ntfy"] += 1
@@ -379,6 +381,7 @@ def _maybe_send_test(app: App, scope_status: str) -> None:
                              f"{scope_status}",
                              attachment=_snapshot(app, fetch=True)):
             app.state.mark_test_sent()
+            app.state.contact(app.clock().timestamp())
             log.info("TEST notification sent")
         else:
             app.failures["ntfy"] += 1
@@ -395,7 +398,12 @@ def run_cycle(app: App) -> str:
 
     # The DEBUG=2 test send runs before the scope gate so a restart always announces itself,
     # and says whether it is checking radar or waiting for a scope.
-    online = _debounce_scopes(app, app.scope_check()) if cfg.scope_hosts else None
+    online = None
+    if cfg.scope_hosts:
+        answered = app.scope_check()
+        if answered:
+            app.state.contact(ts)
+        online = _debounce_scopes(app, answered)
     _maybe_send_test(app, _scope_status(cfg, online))
     if online is not None:
         try:
@@ -408,6 +416,13 @@ def run_cycle(app: App) -> str:
             app.state.clear_latch()
             if app.recorder is not None:
                 app.recorder.close("scope gate closed")
+            # Nothing is fetched while the gate is closed, so a cheap reachability probe is
+            # the only way to tell a quiet night from a container with no network (#62).
+            try:
+                if app.probe():
+                    app.state.contact(ts)
+            except Exception:
+                log.exception("reachability probe failed")
             line = (f"frame=none age=n/a radar=skipped raining_now=0 eta=none sources=none "
                     f"pirate=skipped latched=0 outcome=scope-offline "
                     f"note=no scope online ({cfg.scope_hosts})")
@@ -434,6 +449,8 @@ def run_cycle(app: App) -> str:
                       kind, product, exc, app.failures[f"radar.{kind}"])
             continue
         statuses[product] = status
+        if app.radar.frames(product):
+            app.state.contact(ts)        # the bucket answered, whatever the frame's state
         if d is not None:
             dets.append(d)
         frames = app.radar.frames(product)
@@ -468,6 +485,7 @@ def run_cycle(app: App) -> str:
     if app.pirate is not None:
         try:
             pr = app.pirate.check(now)
+            app.state.contact(ts)
             _pirate_announce(app, _pirate_recovered)
             pirate_txt = "ok"
         except PirateError as exc:
@@ -499,6 +517,7 @@ def run_cycle(app: App) -> str:
                f"{decision.message}"
         if app.notifier.send(decision.title, body, attachment=_snapshot(app)):
             app.state.set_latch(ts)
+            app.state.contact(ts)
             app.failures["ntfy"] = 0
             log.info(
                 "%s: %s",
@@ -562,6 +581,7 @@ def build_app(cfg: Config) -> App:
         notifier=Notifier(client, cfg.ntfy_url, cfg.ntfy_token, cfg.ntfy_priority),
         state=State(cfg.state_dir),
         recorder=Recorder(Path(cfg.state_dir) / "recordings") if cfg.auto_record else None,
+        probe=lambda: bucket_reachable(client),
         scope_check=scope_check,
         pirate=(PirateSource(client, cfg.pw_key, cfg.lat, cfg.lon, lookahead_min=cfg.lookahead_min,
                              min_prob=cfg.min_prob, min_intensity=cfg.min_intensity,
